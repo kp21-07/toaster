@@ -2,12 +2,16 @@ import cv2
 import numpy as np
 import math
 from ultralytics import YOLO
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
-# Constraints
-BREZADBOARD_RATIO = 54/165
-HOLE_GRID_X = 63
-HOLE_GRID_Y = 14
+# --- Type Definitions ---
+Point = Tuple[float, float]
+HoleCoord = Tuple[int, int]
+BoundingBox = List[Point] # [TL, TR, BR, BL] usually
+RawComponent = Tuple[int, str, List[List[float]]] # (class_id, class_name, corners)
+ComponentTerminals = Tuple[int, str, List[Point]] # (class_id, class_name, [pin1, pin2, ...])
+WireData = List[Union[int, str, List[str]]] # [id, name, [hole_id1, hole_id2]]
+HoleGrid = List[List[HoleCoord]]
 
 def perspective_transform(image : np.ndarray, contour : np.ndarray) -> np.ndarray:
     """
@@ -21,7 +25,6 @@ def perspective_transform(image : np.ndarray, contour : np.ndarray) -> np.ndarra
         np.ndarray: The warped, top-down view of the breadboard.
     """
     pts = contour.reshape(4, 2)
- 
     rect = np.zeros((4, 2), dtype="float32")
     s = pts.sum(axis=1)
     rect[0] = pts[np.argmin(s)]
@@ -94,7 +97,7 @@ def detect_breadboard(image : np.ndarray) -> np.ndarray:
     
     return warped
 
-def pixel_map(image : np.ndarray) -> List[List[Tuple[int, int]]]:
+def pixel_map(image : np.ndarray) -> HoleGrid:
     """
     Calculates the pixel coordinates of every hole on the breadboard based on standard spacing.
     
@@ -171,7 +174,7 @@ def pixel_map(image : np.ndarray) -> List[List[Tuple[int, int]]]:
 
     return holes_matrix
 
-def detect_components(image: np.ndarray, model: YOLO) -> List[Tuple[int, str, List[List[float]]]]:
+def detect_components(image: np.ndarray, model: YOLO) -> List[RawComponent]:
     """
     Runs YOLO object detection to find components on the breadboard.
     
@@ -196,7 +199,7 @@ def detect_components(image: np.ndarray, model: YOLO) -> List[Tuple[int, str, Li
             components.append((cls_id,class_name,coords))
     return components
 
-def get_equally_spaced_points(p1: Tuple[float, float], pn: Tuple[float, float], n: int) -> List[Tuple[float, float]]:
+def get_equally_spaced_points(p1: Point, pn: Point, n: int) -> List[Point]:
     """
     Interpolates N equally spaced points between two coordinates.
     Used for determining pin locations on multi-pin components like ICs.
@@ -211,7 +214,7 @@ def get_equally_spaced_points(p1: Tuple[float, float], pn: Tuple[float, float], 
         points.append((x, y))
     return points
 
-def extract_component_terminals(components: List[Tuple[int, str, List[List[float]]]]) -> List[Tuple[int, str, List[Tuple[float, float]]]]:
+def extract_component_terminals(components: List[RawComponent]) -> List[ComponentTerminals]:
     """
     Determines the exact termination points (pins) for each component.
     
@@ -291,7 +294,7 @@ def extract_component_terminals(components: List[Tuple[int, str, List[List[float
 
     return component_endpoints_list
 
-def detect_wires(image: np.ndarray, model: YOLO, holes: List[List[Tuple[int, int]]]) -> List[List[int | str | List[str]]]:
+def detect_wires(image: np.ndarray, model: YOLO, holes: HoleGrid) -> List[WireData]:
     """
     Detects jumper wires using Keypoint detection and maps endpoints to breadboard hole IDs.
 
@@ -342,3 +345,45 @@ def detect_wires(image: np.ndarray, model: YOLO, holes: List[List[Tuple[int, int
         wire_data.append([0, f"Wire {idx+1}", brdbord_coords])
 
     return wire_data
+
+def map_terminals_to_holes(components: List[ComponentTerminals], holes: HoleGrid) -> List[Tuple[int, str, List[str]]]:
+    """
+    Maps component terminal coordinates to the nearest breadboard holes.
+
+    Args:
+        components: List of components with (x,y) pin coordinates.
+        holes: The grid of hole coordinates.
+ 
+    Returns:
+        List of (class_id, class_name, ["A1", "B2", ...])
+    """
+    y_to_letter = {0:'U-',1:'U+',2:'A',3:'B',4:'C',5:'D',6:'E',7:'J',8:'I',9:'H',10:'G',11:'F',12:'L+',13:'L-'}
+    mapped_components = []
+
+    for comp in components:
+        cls_id, name, terminals = comp
+        mapped_terminals = []
+
+        for coords in terminals:
+            closest_y = 0
+            closest_x = 0
+            smallest_gap = float('inf')
+
+            # Find row
+            for i in range(14):
+                if abs(holes[i][0][1] - coords[1]) < smallest_gap:
+                    smallest_gap = abs(holes[i][0][1] - coords[1])
+                    closest_y = i
+
+            # Find col
+            smallest_gap = float('inf')
+            for j in range(len(holes[closest_y])):
+                if abs(holes[closest_y][j][0] - coords[0]) < smallest_gap:
+                    smallest_gap = abs(holes[closest_y][j][0] - coords[0])
+                    closest_x = j
+
+            mapped_terminals.append(y_to_letter[closest_y] + str(closest_x))
+
+        mapped_components.append((cls_id, name, mapped_terminals))
+
+    return mapped_components
