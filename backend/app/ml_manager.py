@@ -46,7 +46,7 @@ class MLManager:
         Retrieves the loaded component detection model.
 
         Returns:
-            YOLO: The YOLO v8 model instance for component detection.
+            YOLO: The YOLO model instance for component detection.
 
         Raises:
             RuntimeError: If the model has not been loaded.
@@ -60,7 +60,7 @@ class MLManager:
         Retrieves the loaded wire endpoint detection model.
 
         Returns:
-            YOLO: The YOLO v8 model instance for wire detection.
+            YOLO: The YOLO model instance for wire detection.
 
         Raises:
             RuntimeError: If the model has not been loaded.

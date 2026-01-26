@@ -1,9 +1,9 @@
 from typing import List, Dict, Tuple, Union
 
 # --- Type Aliases ---
-PhysicalHole = str        # e.g., "A5", "U+"
-ElectricalNode = str      # e.g., "A5", "F10" (canonical representative)
-NodeID = int              # Integer ID used in SPICE (0 for ground)
+PhysicalHole = str
+ElectricalNode = str
+NodeID = int
 Wire = List[Union[int, str, List[str]]] # [id, name, [foot1, foot2]]
 ComponentData = Tuple[int, str, List[PhysicalHole], str] # (id, name, [foot1, foot2], spec)
 

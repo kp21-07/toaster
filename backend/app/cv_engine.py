@@ -7,7 +7,7 @@ from typing import List, Tuple, Union, Optional
 # --- Type Definitions ---
 Point = Tuple[float, float]
 HoleCoord = Tuple[int, int]
-BoundingBox = List[Point] # [TL, TR, BR, BL] usually
+BoundingBox = List[Point] # [TL, TR, BR, BL]
 RawComponent = Tuple[int, str, List[List[float]]] # (class_id, class_name, corners)
 ComponentTerminals = Tuple[int, str, List[Point]] # (class_id, class_name, [pin1, pin2, ...])
 WireData = List[Union[int, str, List[str]]] # [id, name, [hole_id1, hole_id2]]
