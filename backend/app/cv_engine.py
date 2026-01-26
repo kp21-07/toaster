@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import math
 from ultralytics import YOLO
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Optional
 
 # --- Type Definitions ---
 Point = Tuple[float, float]
@@ -19,7 +19,8 @@ def perspective_transform(image : np.ndarray, contour : np.ndarray) -> np.ndarra
     
     Args:
         image (np.ndarray): The source image.
-        contour (np.ndarray): The 4 points of the detected breadboard outline.
+        contour (np.ndarray): The 4 points of the detected breadboard outline. 
+                              Expected shape is (4, 1, 2) or (4, 2).
         
     Returns:
         np.ndarray: The warped, top-down view of the breadboard.
@@ -73,7 +74,7 @@ def detect_breadboard(image : np.ndarray) -> np.ndarray:
 
     edges = cv2.Canny(gray, 50, 150)
 
-    kernel = cv2.getStructuringElement(cv2.MOPRH_RECT, (5, 5))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
 
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -203,6 +204,14 @@ def get_equally_spaced_points(p1: Point, pn: Point, n: int) -> List[Point]:
     """
     Interpolates N equally spaced points between two coordinates.
     Used for determining pin locations on multi-pin components like ICs.
+
+    Args:
+        p1 (Point): Starting point (x, y).
+        pn (Point): Ending point (x, y).
+        n (int): Number of points to generate (including start and end).
+
+    Returns:
+        List[Point]: List of (x, y) tuples representing the interpolated points.
     """
     x1, y1 = p1
     xn, yn = pn
@@ -216,13 +225,13 @@ def get_equally_spaced_points(p1: Point, pn: Point, n: int) -> List[Point]:
 
 def extract_component_terminals(components: List[RawComponent]) -> List[ComponentTerminals]:
     """
-    Determines the exact termination points (pins) for each component.
+    Determines the exact termination points (pins) for each component based on orientation and type.
     
     Args:
-        components (List): Raw component detections from detect_components.
+        components (List[RawComponent]): Raw component detections from detect_components.
         
     Returns:
-        List: Components with pin coordinates instead of bounding boxes.
+        List[ComponentTerminals]: Components with pin coordinates instead of bounding boxes.
               Format: (class_id, class_name, [(x, y), (x, y), ...])
     """
     component_endpoints_list = []
@@ -304,7 +313,7 @@ def detect_wires(image: np.ndarray, model: YOLO, holes: HoleGrid) -> List[WireDa
         holes (List[List[Tuple]]): The grid of hole coordinates (from pixel_map).
 
     Returns:
-        List: A list of wires with their connected holes.
+        List[WireData]: A list of wires with their connected holes.
               Format: [0, "Wire N", ["A1", "J63"]]
     """
     y_to_letter = {0:'U-',1:'U+',2:'A',3:'B',4:'C',5:'D',6:'E',7:'J',8:'I',9:'H',10:'G',11:'F',12:'L+',13:'L-'}
@@ -351,11 +360,12 @@ def map_terminals_to_holes(components: List[ComponentTerminals], holes: HoleGrid
     Maps component terminal coordinates to the nearest breadboard holes.
 
     Args:
-        components: List of components with (x,y) pin coordinates.
-        holes: The grid of hole coordinates.
+        components (List[ComponentTerminals]): List of components with (x,y) pin coordinates.
+        holes (HoleGrid): The grid of hole coordinates.
  
     Returns:
-        List of (class_id, class_name, ["A1", "B2", ...])
+        List[Tuple[int, str, List[str]]]: List of components mapped to physical holes.
+               Format: (class_id, class_name, ["A1", "B2", ...])
     """
     y_to_letter = {0:'U-',1:'U+',2:'A',3:'B',4:'C',5:'D',6:'E',7:'J',8:'I',9:'H',10:'G',11:'F',12:'L+',13:'L-'}
     mapped_components = []

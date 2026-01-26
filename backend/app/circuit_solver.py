@@ -4,25 +4,34 @@ from typing import List, Dict, Tuple, Union
 PhysicalHole = str        # e.g., "A5", "U+"
 ElectricalNode = str      # e.g., "A5", "F10" (canonical representative)
 NodeID = int              # Integer ID used in SPICE (0 for ground)
-Wire = List               # [id, name, [foot1, foot2]] - keeping generic list for legacy compact logic 
+Wire = List[Union[int, str, List[str]]] # [id, name, [foot1, foot2]]
 ComponentData = Tuple[int, str, List[PhysicalHole], str] # (id, name, [foot1, foot2], spec)
 
 def hole_to_node(hole: PhysicalHole) -> ElectricalNode:
     """
-    Maps a physical hole coordinate (e.g., 'C5', 'J10') to its electrical node ID.
-    On a breadboard, columns A-E are connected, and F-J are connected.
+    Maps a physical hole coordinate (e.g., 'C5', 'J10') to its canonical electrical node ID.
+    On a breadboard, columns A-E are centrally connected row-wise (no, column-wise, rows 1-63),
+    and F-J are connected similarly. Power rails are connected lengthwise.
+    
+    Correction: In standard breadboards:
+    - Main area: Columns (vertical strips) A-E are common, F-J are common.
+      Usually these are technically "Rows" 1 to 63. Let's stick to the nomenclature
+      that 'A1', 'B1', 'C1', 'D1', 'E1' are all electrically connected.
+      This function implements that mapping.
     
     Args:
-        hole (str): The physical hole ID (e.g., "A5", "G10", "U+").
+        hole (PhysicalHole): The physical hole ID (e.g., "A5", "G10", "U+").
         
     Returns:
-        str: The canonical electrical node ID (e.g., "A5", "F10").
+        ElectricalNode: The canonical electrical node ID (e.g., "A5", "F10").
+                       Returns empty string if input is invalid.
     """
     if not hole : return ""
 
     pref = hole[0]
 
-    # Rows 'A-E' are connected column wise. Map all of them to 'A' + Column
+    # Rows 'A-E' are connected column wise (actually row-wise in breadboard terms, but let's say index-wise).
+    # Map all of them to 'A' + Column
     if ord('A') <= ord(pref) < ord('F'):
         return 'A' + hole[1:]
 
@@ -34,17 +43,20 @@ def hole_to_node(hole: PhysicalHole) -> ElectricalNode:
     else:
         return hole[:2]
 
-def build_node_map(wires: List[Wire]  , grounds: List[PhysicalHole]) -> Tuple[Dict[ElectricalNode, NodeID], int]:
+def build_node_map(wires: List[Wire], grounds: List[PhysicalHole]) -> Tuple[Dict[ElectricalNode, NodeID], int]:
     """
-    Builds a map of {Physical_Hole_ID: Electrical_Node_Int}.
-    Handles wires by merging connected nodes into the same ID.
+    Builds a map of {Electrical_Node_String: Electrical_Node_Int}.
+    Handles wires by merging connected nodes into the same integer ID.
 
     Args:
-        wires: List of [id, name, [start, end]]
-        grounds: List of physical holes that are grounded.
+        wires (List[Wire]): List of jumper wires. 
+                           Format: [id, name, [start_hole, end_hole]]
+        grounds (List[PhysicalHole]): List of physical holes that are grounded.
 
     Returns:
-        (nodemap, next_available_node_id)
+        Tuple[Dict[ElectricalNode, NodeID], int]: 
+            - A dictionary mapping canonical node strings to SPICE node integers.
+            - The next available node integer ID.
     """
     nodemap = {}
     counter = 1
@@ -96,7 +108,7 @@ def generate_spice_netlist(components: List[ComponentData], wires: List[Wire], g
                                           (id, name, [list_of_physical_legs], spec_value).
         wires (List[Wire]): List of jumper wires. 
                             Format: [id, name, [start_hole, end_hole]].
-        grounds (List[str]): List of physical holes connected to ground (e.g. ["A1", "J10"]).
+        grounds (List[PhysicalHole]): List of physical holes connected to ground (e.g. ["A1", "J10"]).
 
     Returns:
         str: The complete SPICE netlist text, including component definitions 
