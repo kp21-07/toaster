@@ -2,6 +2,7 @@
 .DS_Store
 Thumbs.db
 tbt.txt
+*.log
 
 # Python
 __pycache__/
@@ -56,8 +57,30 @@ cover/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Specific Frontend Paths (if needed to be explicit)
+frontend/node_modules/
+frontend/dist/
+
 # Editor / IDE
 .vscode/
+!.vscode/extensions.json
 .idea/
 *.swp
 *.swo
+*.sw?
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
