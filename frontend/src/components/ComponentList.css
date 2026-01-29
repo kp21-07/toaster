@@ -14,7 +14,6 @@
   font-size: 0.9rem;
   color: var(--text-main);
   table-layout: fixed;
-  /* Enforce column widths */
 }
 
 .component-table th {
@@ -30,22 +29,17 @@
   width: 20%;
 }
 
-/* Name */
 .component-table th:nth-child(2) {
   width: 20%;
 }
 
-/* Type */
 .component-table th:nth-child(3) {
   width: 20%;
 }
 
-/* Terminals */
 .component-table th:nth-child(4) {
   width: 20%;
 }
-
-/* Value */
 
 .component-table td {
   padding: 12px 16px;
@@ -70,7 +64,6 @@
   background-color: var(--primary-light);
   color: var(--primary-text);
   border: none;
-  /* Ensure no border for select */
   cursor: pointer;
 }
 
@@ -114,9 +107,7 @@
 .component-edit-input {
   width: 100%;
   padding: 4px 8px;
-  /* Reduced from 12px 16px to fit inside cell padding */
   border: 1px solid transparent;
-  /* Hidden border by default */
   border-radius: 4px;
   background-color: transparent;
   font-family: inherit;
