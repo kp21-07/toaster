@@ -9,21 +9,13 @@ ComponentData = Tuple[int, str, List[PhysicalHole], str] # (id, name, [foot1, fo
 
 def hole_to_node(hole: PhysicalHole) -> ElectricalNode:
     """
-    Maps a physical hole coordinate (e.g., 'C5', 'J10') to its canonical electrical node ID.
-    On a breadboard, columns A-E are centrally connected row-wise (no, column-wise, rows 1-63),
-    and F-J are connected similarly. Power rails are connected lengthwise.
-    
-    Correction: In standard breadboards:
-    - Main area: Columns (vertical strips) A-E are common, F-J are common.
-      Usually these are technically "Rows" 1 to 63. Let's stick to the nomenclature
-      that 'A1', 'B1', 'C1', 'D1', 'E1' are all electrically connected.
-      This function implements that mapping.
+    Maps a physical hole coordinate to its canonical electrical node ID.
     
     Args:
-        hole (PhysicalHole): The physical hole ID (e.g., "A5", "G10", "U+").
+        hole (PhysicalHole): The physical hole ID.
         
     Returns:
-        ElectricalNode: The canonical electrical node ID (e.g., "A5", "F10").
+        ElectricalNode: The canonical electrical node ID.
                        Returns empty string if input is invalid.
     """
     if not hole : return ""
@@ -104,15 +96,14 @@ def generate_spice_netlist(components: List[ComponentData], wires: List[Wire], g
     Generates the final SPICE netlist string from the circuit definition.
 
     Args:
-        components (List[ComponentData]): List of components. Each item is a tuple:
-                                          (id, name, [list_of_physical_legs], spec_value).
+        components (List[ComponentData]): List of components. 
+                                          Each item is a tuple: (id, name, [list_of_physical_legs], spec_value).
         wires (List[Wire]): List of jumper wires. 
                             Format: [id, name, [start_hole, end_hole]].
-        grounds (List[PhysicalHole]): List of physical holes connected to ground (e.g. ["A1", "J10"]).
+        grounds (List[PhysicalHole]): List of physical holes connected to ground.
 
     Returns:
-        str: The complete SPICE netlist text, including component definitions 
-             (e.g., "R1 N0001 N0002 10k") and control commands like ".backanno".
+        str: The complete SPICE netlist text.
     """
     # Building the connectivity map
     nodemap, counter = build_node_map(wires, grounds)

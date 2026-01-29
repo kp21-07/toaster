@@ -106,8 +106,8 @@ def pixel_map(image : np.ndarray) -> HoleGrid:
         image (np.ndarray): The warped breadboard image (used for dimensions).
         
     Returns:
-        List[List[Tuple[int, int]]]: A matrix where each element is the (x, y) coordinate
-                                     of a hole. Order follows the breadboard rows logic.
+        HoleGrid: A matrix where each element is the (x, y) coordinate of a hole.
+                  Order follows the breadboard rows logic.
     """
     height, width, _ = image.shape
 
@@ -184,8 +184,8 @@ def detect_components(image: np.ndarray, model: YOLO) -> List[RawComponent]:
         model (YOLO): The loaded YOLOv8 model instance.
         
     Returns:
-        List[Tuple[int, str, List[List[float]]]]: A list of detected components.
-                                                  Format: (class_id, class_name, [box_corners])
+        List[RawComponent]: A list of detected components.
+                            Format: (class_id, class_name, [box_corners])
     """
     results = model.predict(source=image, save=False, conf=0.20, iou=0.25)
     components = []
@@ -232,7 +232,7 @@ def extract_component_terminals(components: List[RawComponent]) -> List[Componen
         
     Returns:
         List[ComponentTerminals]: Components with pin coordinates instead of bounding boxes.
-              Format: (class_id, class_name, [(x, y), (x, y), ...])
+                                  Format: (class_id, class_name, [(x, y), (x, y), ...])
     """
     component_endpoints_list = []
 
@@ -310,11 +310,11 @@ def detect_wires(image: np.ndarray, model: YOLO, holes: HoleGrid) -> List[WireDa
     Args:
         image (np.ndarray): The warped breadboard image.
         model (YOLO): The wire endpoint detection model.
-        holes (List[List[Tuple]]): The grid of hole coordinates (from pixel_map).
+        holes (HoleGrid): The grid of hole coordinates (from pixel_map).
 
     Returns:
         List[WireData]: A list of wires with their connected holes.
-              Format: [0, "Wire N", ["A1", "J63"]]
+                        Format: [0, "Wire N", ["A1", "J63"]]
     """
     y_to_letter = {0:'U-',1:'U+',2:'A',3:'B',4:'C',5:'D',6:'E',7:'J',8:'I',9:'H',10:'G',11:'F',12:'L+',13:'L-'}
     results = model(image)[0]
@@ -365,7 +365,7 @@ def map_terminals_to_holes(components: List[ComponentTerminals], holes: HoleGrid
  
     Returns:
         List[Tuple[int, str, List[str]]]: List of components mapped to physical holes.
-               Format: (class_id, class_name, ["A1", "B2", ...])
+                                          Format: (class_id, class_name, ["A1", "B2", ...])
     """
     y_to_letter = {0:'U-',1:'U+',2:'A',3:'B',4:'C',5:'D',6:'E',7:'J',8:'I',9:'H',10:'G',11:'F',12:'L+',13:'L-'}
     mapped_components = []

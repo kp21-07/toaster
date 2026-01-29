@@ -21,7 +21,7 @@ class DetectedComponent(BaseModel):
     Represents a component detected by the computer vision model.
     """
     id: int
-    label: str # 'Register' , 'Capacitor' , etc
+    label: str
     box: BoundingBox
     confidence: float
 
@@ -30,10 +30,10 @@ class CircuitComponent(BaseModel):
     Represents a parsed circuit component suitable for netlist generation.
     """
     id: int
-    type: str # 'R' , 'C' , 'LED' , etc
-    name: str # 'R1' , 'C3' , etc
+    type: str
+    name: str
     terminals: List[str]
-    value: str # '10k' , '100uF' , etc
+    value: str
     box: List[List[float]]
 
 class Wire(BaseModel):
