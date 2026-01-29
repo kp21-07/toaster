@@ -3,8 +3,10 @@ import type { CircuitComponent } from '../types';
 import './ComponentList.css';
 interface ComponentListProps {
   components: CircuitComponent[];
+  onUpdate: (id: number, field: keyof CircuitComponent, value: string) => void;
 }
-export const ComponentList: React.FC<ComponentListProps> = ({ components }) => {
+
+export const ComponentList: React.FC<ComponentListProps> = ({ components, onUpdate }) => {
   if (!components || components.length === 0) {
     return <div className="component-list-empty">No components detected.</div>;
   }
@@ -22,12 +24,40 @@ export const ComponentList: React.FC<ComponentListProps> = ({ components }) => {
         <tbody>
           {components.map((comp) => (
             <tr key={comp.id}>
-              <td style={{ fontWeight: 500 }}>{comp.name}</td>
+              <td className="editable-cell">
+                <input
+                  className="component-edit-input"
+                  type="text"
+                  value={comp.name}
+                  onChange={(e) => onUpdate(comp.id, 'name', e.target.value)}
+                />
+              </td>
               <td>
-                <span className="comp-type-badge">{comp.type}</span>
+                <select
+                  className="comp-type-badge component-type-select"
+                  value={comp.type}
+                  onChange={(e) => onUpdate(comp.id, 'type', e.target.value)}
+                >
+                  <option value="Resistor">Resistor</option>
+                  <option value="Capacitor">Capacitor</option>
+                  <option value="Inductor">Inductor</option>
+                  <option value="LED">LED</option>
+                  <option value="Source">Source</option>
+                  <option value="Diode">Diode</option>
+                  <option value="Transistor">Transistor</option>
+                  <option value="IC">IC</option>
+                  <option value="Wire">Wire</option>
+                </select>
               </td>
               <td>{comp.terminals.join(', ')}</td>
-              <td>{comp.value}</td>
+              <td className="editable-cell">
+                <input
+                  className="component-edit-input"
+                  type="text"
+                  value={comp.value}
+                  onChange={(e) => onUpdate(comp.id, 'value', e.target.value)}
+                />
+              </td>
             </tr>
           ))}
         </tbody>
