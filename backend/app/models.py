@@ -34,6 +34,7 @@ class CircuitComponent(BaseModel):
     name: str # 'R1' , 'C3' , etc
     terminals: List[str]
     value: str # '10k' , '100uF' , etc
+    box: List[List[float]]
 
 class Wire(BaseModel):
     """
@@ -52,6 +53,7 @@ class AnalysisResponse(BaseModel):
     wires: List[Wire]
     netlist: str
     annotated_image: Optional[str] = None # Optional Base64 encoded debug image
+    warped_image: Optional[str] = None # Optional Base64 encoded warped image
 
 class NetlistRequest(BaseModel):
     """
