@@ -21,9 +21,9 @@
 
   --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.05);
 
-  /* --- DARK MODE --- */
-  
-  /* --primary: #3b82f6;        
+  /* --- DARK MODE (Commented for easy switching) --- */
+  /*
+  --primary: #3b82f6;        
   --primary-light: #1e3a8a;  
   --primary-text: #93c5fd;   
   
@@ -42,8 +42,8 @@
   --scrollbar-thumb: #4b5563;
   --scrollbar-track: #1f2937;
   
-  --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.3); */
- 
+  --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.3);
+  */
 }
 
 body {
@@ -61,53 +61,21 @@ body {
   min-height: 100vh;
 }
 
-/* Header */
-.app-header {
-  margin-bottom: 2rem;
-  text-align: center;
-}
-
-.app-title {
+h1 {
   font-size: 2rem;
   font-weight: bold;
   margin: 0;
   color: var(--text-main);
 }
 
-.app-header p {
-  color: var(--text-muted);
-}
-
-/* Layout */
-.main-layout {
-  max-width: 1200px;
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: minmax(300px, 40%) 1fr;
-  gap: 2rem;
-  align-items: start;
-  transition: all 0.3s ease;
-}
-
-/* Columns */
-.column {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-}
-
-/* Typography */
-.section-title {
+h2 {
   font-size: 1.2rem;
   margin-bottom: 1rem;
   color: var(--text-muted);
 }
 
-.file-name {
-  margin-top: 0.5rem;
-  font-size: 0.9rem;
+p {
   color: var(--text-muted);
-  text-align: center;
 }
 
 @keyframes fadeIn {

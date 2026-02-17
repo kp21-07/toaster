@@ -3,20 +3,19 @@ import { Copy, Check } from 'lucide-react'
 import './NetlistViewer.css'
 
 interface NetlistViewerProps {
-  netlist: string;
-  onNetlistChange: (newNetlist: string) => void;
+	netlist : string;
 }
 
-export const NetlistViewer: React.FC<NetlistViewerProps> = ({ netlist, onNetlistChange }) => {
-  const [copied, setCopied] = useState(false);
+export const NetlistViewer: React.FC<NetlistViewerProps> = ({ netlist }) => {
+	const [copied, setCopied] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(netlist);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+	const handleCopy = () => {
+		navigator.clipboard.writeText(netlist);
+		setCopied(true);
+		setTimeout(() => setCopied(false), 2000);
+	};
 
-  return (
+	return (
     <div className="netlist-container">
       <div className="netlist-header">
         <span className="netlist-title">SPICE Netlist</span>
@@ -32,12 +31,9 @@ export const NetlistViewer: React.FC<NetlistViewerProps> = ({ netlist, onNetlist
           )}
         </button>
       </div>
-      <textarea
-        className="netlist-editor"
-        value={netlist}
-        onChange={(e) => onNetlistChange(e.target.value)}
-        spellCheck={false}
-      />
-    </div >
+      <pre className="netlist-code">
+        <code>{netlist}</code>
+      </pre>
+    </div>
   );
 };
