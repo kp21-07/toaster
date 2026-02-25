@@ -12,7 +12,7 @@ export interface DetectedComponent {
     id: number;
     label: string;
     box: BoundingBox;
-    confidence: float;
+    confidence: number;
 }
 
 // Final Circuit Component (for SPICE)
