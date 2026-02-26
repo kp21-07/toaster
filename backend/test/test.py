@@ -1,286 +1,308 @@
-
 import cv2
 import numpy as np
-import sys
-import os
 
-# Ensure we can import from backend/app
-# Assuming this script is run from backend/ directory
-sys.path.append(os.getcwd())
+def generate_global_grid(holes):
+    if not holes:
+        return []
+        
+    def cluster_1d(coords, tol=10):
+        coords = np.sort(coords)
+        splits = np.where(np.diff(coords) >= tol)[0] + 1
+        return [int(np.median(c)) for c in np.split(coords, splits)]
 
-try:
-    from app.cv_engine import pixel_map
-except ImportError:
-    print("Error: Could not import pixel_map. Run this from 'backend/' directory using 'uv run test/test.py'")
-    sys.exit(1)
+    unique_y = cluster_1d([p[1] for p in holes])
+    unique_x = cluster_1d([p[0] for p in holes])
+        
+    # Interpolate synthetic Y rows across large plastic trenches
+    y_gaps = np.diff(unique_y)
+    med_gap = np.median(y_gaps)
+    
+    cont_y = [unique_y[0]]
+    for y, gap in zip(unique_y[1:], y_gaps):
+        if gap > med_gap * 1.5:
+            steps = int(round(gap / med_gap))
+            cont_y.extend([int(cont_y[-1] + j * (gap / steps)) for j in range(1, steps)])
+        cont_y.append(y)
+        
+    print(f"Projecting global symmetric grid from detected layout: {len(unique_x)} columns by {len(cont_y)} rows.")
+    return [(x, y) for y in cont_y for x in unique_x]
 
-def get_wire_mask(image):
-    # Convert to HSV
+def detect_holes(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY_INV)
+    
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    hole_centers = []
+    
+    for c in contours:
+        area = cv2.contourArea(c)
+        if 5 < area < 100:
+            x,y,w,h = cv2.boundingRect(c)
+            if 0.5 < w/h < 2.0:
+                M = cv2.moments(c)
+                if M["m00"] != 0:
+                    cX = int(M["m10"] / M["m00"])
+                    cY = int(M["m01"] / M["m00"])
+                    hole_centers.append((cX, cY))
+    
+    return generate_global_grid(hole_centers)
+
+def draw_grid(vis_image, holes, cell_w, cell_h):
+    """Draws bounding boxes around every grid cell to visualize the matrix structure."""
+    height, width, _ = vis_image.shape
+    for (hx, hy) in holes:
+        x1 = max(0, hx - cell_w // 2)
+        y1 = max(0, hy - cell_h // 2)
+        x2 = min(width - 1, hx + cell_w // 2)
+        y2 = min(height - 1, hy + cell_h // 2)
+        cv2.rectangle(vis_image, (x1, y1), (x2, y2), (0, 255, 0), 1)
+        
+def extract_color_masks(image):
+    """Isolates the Red, Blue, and Green wires using HSV thresholding."""
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    height, width, _ = image.shape
     
-    lower_red1 = np.array([0, 100, 100])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([160, 100, 100])
-    upper_red2 = np.array([180, 255, 255])
+    color_ranges = {
+        'Red': [
+            (np.array([0, 100, 100]), np.array([10, 255, 255])),
+            (np.array([160, 100, 100]), np.array([180, 255, 255]))
+        ],
+        'Blue': [
+            (np.array([90, 100, 100]), np.array([130, 255, 255]))
+        ],
+        'Green': [
+            (np.array([40, 50, 50]), np.array([90, 255, 255]))
+        ]
+    }
     
-    mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
-    mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
-    
-    mask = cv2.bitwise_or(mask1, mask2)
-    
-    # Morphological Closing to fill gaps in the wire mask
-    kernel = np.ones((5,5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    
-    return mask
+    color_masks = {}
+    kernel = np.ones((3, 3), np.uint8)
+    for color_name, ranges in color_ranges.items():
+        color_mask = np.zeros((height, width), dtype=np.uint8)
+        for lower, upper in ranges:
+            mask = cv2.inRange(hsv, lower, upper)
+            color_mask = cv2.bitwise_or(color_mask, mask)
+        color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_OPEN, kernel)
+        color_masks[color_name] = color_mask
+    return color_masks
 
-def find_wire_seeds(image, holes, mask):
-    seeds = []
+def analyze_nodes(mask, holes, cell_w, cell_h):
+    """Analyzes perimeter crossings of each grid cell to find Endpoints and Path Nodes."""
     height, width = mask.shape
-    radius = 8
-    threshold = 0.1
-
-    for row_idx, row in enumerate(holes):
-        for col_idx, (hx, hy) in enumerate(row):
-            if hx - radius < 0 or hx + radius >= width or hy - radius < 0 or hy + radius >= height:
-                continue
-
-            # Extract small ROI (Region of Interest) around the hole
-            roi = mask[hy-radius:hy+radius+1, hx-radius:hx+radius+1]
+    endpoints = []
+    pass_throughs = []
+    
+    # Contour bounding box optimization
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    bounding_rects = [cv2.boundingRect(c) for c in contours if cv2.contourArea(c) > 10]
+    
+    for (hx, hy) in holes:
+        # Check if the hole is near any wire blob
+        inside_bbox = False
+        for (rx, ry, rw, rh) in bounding_rects:
+            if (rx - cell_w) <= hx <= (rx + rw + cell_w) and (ry - cell_h) <= hy <= (ry + rh + cell_h):
+                inside_bbox = True
+                break
+                
+        if not inside_bbox:
+            continue
             
-            if np.count_nonzero(roi) / roi.size > threshold:
-                seeds.append(((row_idx, col_idx), hx, hy))
-
-    return seeds
-
-def get_closest_hole(pixel, holes, max_dist=30):
-    px, py = pixel
-    best_dist = float('inf')
-    best_hole = None
-    
-    # Optimization: Could use spatial index, but brute force is fine for 300 holes
-    for row_idx, row in enumerate(holes):
-        for col_idx, (hx, hy) in enumerate(row):
-            dist = np.sqrt((px - hx)**2 + (py - hy)**2)
-            if dist < best_dist:
-                best_dist = dist
-                best_hole = (row_idx, col_idx)
-    
-    if best_dist <= max_dist:
-        return best_hole
-    return None
-
-def get_direction_score(current_dir, candidate_dir):
-    """
-    Returns a score based on how similar candidate_dir is to current_dir.
-    High score = straight line. Low score = sharp turn.
-    """
-    if current_dir is None: return 0
-    
-    # normalize vectors
-    norm_curr = np.linalg.norm(current_dir)
-    norm_cand = np.linalg.norm(candidate_dir)
-    
-    if norm_curr == 0 or norm_cand == 0: return 0
-    
-    curr_unit = (current_dir[0]/norm_curr, current_dir[1]/norm_curr)
-    cand_unit = (candidate_dir[0]/norm_cand, candidate_dir[1]/norm_cand)
-
-    # return dot product
-    return np.dot(curr_unit, cand_unit)
-
-def trace_wire(mask, start_pixel):
-    """
-    Simulates an 'ant' walking along the wire pixels with momentum.
-    """
-    path = [start_pixel]
-    current_pos = start_pixel
-    current_dir = None # No direction initially
-    visited = set([start_pixel])
-    
-    height, width = mask.shape
-
-    for _ in range(2000): # To avoid infinite loops
-        neighbors = []
+        x1 = max(0, hx - cell_w // 2)
+        y1 = max(0, hy - cell_h // 2)
+        x2 = min(width - 1, hx + cell_w // 2)
+        y2 = min(height - 1, hy + cell_h // 2)
         
-        for dy in [-1, 0, 1]:
-            for dx in [-1, 0, 1]:
-                if dx == 0 and dy == 0:
-                    continue
-                
-                nx, ny = current_pos[0] + dx, current_pos[1] + dy
-                
-                if 0 <= nx < width and 0 <= ny < height:
-                    if mask[ny, nx] == 255 and (nx, ny) not in visited:
-                        neighbors.append((nx, ny))
+        cell_roi = mask[y1:y2+1, x1:x2+1]
+        if np.count_nonzero(cell_roi) == 0:
+            continue
+            
+        top = mask[y1, x1:x2+1]
+        bottom = mask[y2, x1:x2+1]
+        left = mask[y1:y2+1, x1]
+        right = mask[y1:y2+1, x2]
         
-        if not neighbors:
-            break # Dead end
-
-        next_pos = None
-
-        if len(neighbors) == 1:
-            next_pos = neighbors[0]
-        else:
-            if current_dir is None:
-                next_pos = neighbors[0] 
-            else:
-                best_score = -float('inf')
-                best_n = None
+        perimeter = np.concatenate([top, right[1:-1], bottom[::-1], left[::-1][1:-1]])
+        
+        # Vectorized Numpy crossing detection
+        binary_perimeter = (perimeter > 127).astype(np.int8)
+        # Pad with the first element to form a closed loop to catch crossings over the seam
+        closed_perimeter = np.append(binary_perimeter, binary_perimeter[0])
+        crossings = np.sum(np.diff(closed_perimeter) == 1)
                 
-                for n in neighbors:
-                    step_dir = (n[0] - current_pos[0], n[1] - current_pos[1])
-                    score = get_direction_score(current_dir, step_dir)
+        if crossings == 1:
+            if np.count_nonzero(cell_roi) > 50:
+                M = cv2.moments(cell_roi)
+                if M["m00"] != 0:
+                    cX = int(M["m10"] / M["m00"])
+                    cY = int(M["m01"] / M["m00"])
+                    h_roi, w_roi = cell_roi.shape
+                    dist_to_center = np.sqrt((cX - w_roi // 2)**2 + (cY - h_roi // 2)**2)
                     
-                    if score > best_score:
-                        best_score = score
-                        best_n = n
-                next_pos = best_n
+                    if dist_to_center < 8:
+                        endpoints.append((hx, hy))
+        elif crossings == 2 or crossings >= 3:
+            if np.count_nonzero(cell_roi) > 5:
+                pass_throughs.append((hx, hy))
+                
+    return endpoints, pass_throughs
+
+def trace_wires(endpoints, pass_throughs):
+    """DFS search across nodes to connect Endpoints."""
+    all_nodes = set(endpoints + pass_throughs)
+    unvisited_endpoints = set(endpoints)
+    wire_connections = []
+    node_traversals = [] # Store path lists for drawing
+    
+    while unvisited_endpoints:
+        start_node = unvisited_endpoints.pop()
+        current_path = [start_node]
+        visited = {start_node}
         
-        visited.add(next_pos)
+        curr = start_node
+        found_end = None
         
-        new_dir = (next_pos[0] - current_pos[0], next_pos[1] - current_pos[1])
-        
-        current_dir = new_dir 
+        while True:
+            neighbors = []
+            for node in all_nodes:
+                if node not in visited:
+                    dist = np.sqrt((node[0] - curr[0])**2 + (node[1] - curr[1])**2)
+                    if dist < 65:
+                        neighbors.append((dist, node))
             
-        current_pos = next_pos
-        path.append(current_pos)
+            if not neighbors:
+                break
+                
+            neighbors.sort()
+            next_node = neighbors[0][1]
             
-    return path
+            visited.add(next_node)
+            current_path.append(next_node)
+            curr = next_node
+            
+            if curr in endpoints:
+                found_end = curr
+                break
+                
+        if found_end:
+            wire_connections.append((start_node, found_end))
+            if found_end in unvisited_endpoints:
+                unvisited_endpoints.remove(found_end)
+                
+        node_traversals.append(current_path)
+        
+    return wire_connections, node_traversals
+
+def compute_turn_penalty(prev_dir, dx, dy):
+    """Calculates the angle between the previous step vector and the proposed step vector."""
+    if prev_dir == (0, 0):
+        return 0.0
+        
+    dot_product = prev_dir[0]*dx + prev_dir[1]*dy
+    import math
+    mag_prev = math.hypot(prev_dir[0], prev_dir[1])
+    mag_new = math.hypot(dx, dy)
+    
+    if mag_prev > 0 and mag_new > 0:
+        cos_angle = max(-1.0, min(1.0, dot_product / (mag_prev * mag_new)))
+        angle = math.acos(cos_angle)
+        return (angle / math.pi) * 100 
+    return 0.0
+
+def trace_wires_astar(endpoints, pass_throughs):
+    """A* Search (Dijkstra with Turn Penalty) to prevent doubling back in slack loops."""
+    import heapq
+    import math
+    
+    all_nodes = set(endpoints + pass_throughs)
+    unvisited_endpoints = set(endpoints)
+    wire_connections = []
+    node_traversals = []
+    
+    while unvisited_endpoints:
+        start_node = unvisited_endpoints.pop()
+        
+        # Priority queue stores: (cost, current_node, path, previous_direction)
+        # previous_direction is a vector (dx, dy)
+        queue = [(0, start_node, [start_node], (0, 0))]
+        visited_costs = {start_node: 0}
+        
+        found_end = None
+        final_path = []
+        
+        while queue:
+            cost, curr, path, prev_dir = heapq.heappop(queue)
+            
+            if curr in endpoints and curr != start_node:
+                found_end = curr
+                final_path = path
+                break
+                
+            for node in all_nodes:
+                if node not in path: # Don't loop back on our own exact path
+                    dist = math.hypot(node[0] - curr[0], node[1] - curr[1])
+                    if dist < 65: # Reachable neighbor
+                        
+                        dx = node[0] - curr[0]
+                        dy = node[1] - curr[1]
+                        
+                        turn_penalty = compute_turn_penalty(prev_dir, dx, dy)
+                        new_cost = cost + dist + turn_penalty
+                        
+                        if node not in visited_costs or new_cost < visited_costs[node]:
+                            visited_costs[node] = new_cost
+                            heapq.heappush(queue, (new_cost, node, path + [node], (dx, dy)))
+                            
+        if found_end:
+            wire_connections.append((start_node, found_end))
+            if found_end in unvisited_endpoints:
+                unvisited_endpoints.remove(found_end)
+            node_traversals.append(final_path)
+            
+    return wire_connections, node_traversals
 
 def main():
     img_path = "test/image.png"
-
     image = cv2.imread(img_path)
+    if image is None:
+        print(f"Error: Could not read image at {img_path}")
+        return
+        
+    print("Detecting holes dynamically...")
+    holes = detect_holes(image)
+    print(f"Detected {len(holes)} holes.")
     
-    # 2. Get Wire Mask
-    print("Generating mask")
-    mask = get_wire_mask(image)
-    cv2.imwrite("test/debug_mask.jpg", mask)
-    
-    # 3. Get Holes (Pixel Map)
-    print("Generating pixel map")
-    holes = pixel_map(image)
-    
-    # 4. Find Seeds (Start Points)
-    print("Finding seed holes...")
-    seeds = find_wire_seeds(image, holes, mask)
-    print(f"Found {len(seeds)} potential wire seeds.")
-    
+    cell_w, cell_h = 20, 20
     vis_image = image.copy()
     
-    # 5. Trace
-    print("Tracing wires...")
+    print("Drawing grid overlay...")
+    draw_grid(vis_image, holes, cell_w, cell_h)
     
-    processed_pixels = set()
-    wires_found = [] # List of (StartHole, EndHole, Path)
-
-    for i, seed in enumerate(seeds):
-        # seed is ((row, col), x, y)
-        start_hole_idx = seed[0]
-        start_coord = (seed[1], seed[2])
-        
-        # Snap to nearest wire pixel within radius=12
-        snapped_start = None
-        sx, sy = start_coord
-        snap_radius = 12
-        height, width = mask.shape
-
-        # Check center
-        if mask[sy, sx] == 255:
-            snapped_start = start_coord
-        else:
-            # Search outward
-            found = False
-            for r in range(1, snap_radius + 1):
-                for dy in range(-r, r + 1):
-                    for dx in range(-r, r + 1):
-                        nx, ny = sx + dx, sy + dy
-                        if 0 <= nx < width and 0 <= ny < height:
-                            if mask[ny, nx] == 255:
-                                snapped_start = (nx, ny)
-                                found = True
-                                break
-                    if found: break
-                if found: break
-        
-        if snapped_start is None:
-            continue
-            
-        if snapped_start in processed_pixels:
-            continue
-            
-        path = trace_wire(mask, snapped_start)
-        
-        # If path length > 100 (filter tiny noise), we found something
-        if len(path) > 100:
-            # Mark all pixels in this path as processed so we don't start tracing from them again
-            for p in path:
-                processed_pixels.add(p)
-            
-            end_pixel = path[-1]
-            end_hole_idx = get_closest_hole(end_pixel, holes)
-            
-            if end_hole_idx:
-                # Filter out the red power rail which traces up to ~2000 length
-                if len(path) < 1800:
-                    wires_found.append({
-                        "start": start_hole_idx,
-                        "end": end_hole_idx,
-                        "length": len(path),
-                        "path": path
-                    })
-
-    # Post-processing to extract exactly the unique 4 wires
-    print("\n--- WIRE COORDINATES ---")
+    print("Extracting color masks...")
+    color_masks = extract_color_masks(image)
     
-    # Sort ALL wires by length descending so we process the best ones first
-    wires_found.sort(key=lambda x: x['length'], reverse=True)
-    
-    def same_wire(w1, w2):
-        s1, e1 = w1['start'], w1['end']
-        s2, e2 = w2['start'], w2['end']
+    for color_name, mask in color_masks.items():
+        print(f"\n--- {color_name} Wires ---")
+        endpoints, pass_throughs = analyze_nodes(mask, holes, cell_w, cell_h)
+        print(f"Found {len(endpoints)} Endpoints and {len(pass_throughs)} Path Nodes.")
         
-        def dist(h1, h2):
-            return ((h1[0]-h2[0])**2 + (h1[1]-h2[1])**2)**0.5
+        for ep in endpoints:
+            cv2.circle(vis_image, ep, 6, (0, 0, 255), 2)
+        for pt in pass_throughs:
+            cv2.circle(vis_image, pt, 2, (0, 255, 0), -1)
             
-        # Wires are duplicates if their ends are near each other (<= 3 grid distance)
-        return (dist(s1, s2) <= 3 and dist(e1, e2) <= 3) or \
-               (dist(s1, e2) <= 3 and dist(e1, s2) <= 3)
-
-    final_wires = []
-    
-    for w in wires_found:
-        is_duplicate = False
-        for fw in final_wires:
-            if same_wire(w, fw):
-                is_duplicate = True
-                break
-        if not is_duplicate:
-            final_wires.append(w)
-            
-    final_4_wires = final_wires[:4]
-    
-    # Draw specifically the top 4 wires to highlight them
-    for i, w in enumerate(final_4_wires):
-        print(f"Wire {i+1}: {w['start']} <-> {w['end']} (Trace Len: {w['length']})")
-        pts = np.array(w['path'], np.int32)
-        pts = pts.reshape((-1, 1, 2))
-        cv2.polylines(vis_image, [pts], False, (0, 255, 0), 2)
+        connections, traversals = trace_wires_astar(endpoints, pass_throughs)
         
-        # Draw endpoints
-        sh_px = holes[w['start'][0]][w['start'][1]]
-        eh_px = holes[w['end'][0]][w['end'][1]]
-        cv2.circle(vis_image, sh_px, 5, (0, 0, 255), -1) # Red Start
-        cv2.circle(vis_image, eh_px, 5, (255, 0, 0), -1) # Blue End
-        
-        # We can also add text label
-        midpoint = w['path'][len(w['path'])//2]
-        cv2.putText(vis_image, f"W{i+1}", midpoint, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
-        cv2.putText(vis_image, f"W{i+1}", midpoint, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            
-    cv2.imwrite("test/debug_result.jpg", vis_image)
-    print("------------------------------\nSaved debug_result.jpg")
+        for path in traversals:
+            for i in range(len(path)-1):
+                cv2.line(vis_image, path[i], path[i+1], (0, 255, 255), 2)
+                
+        for start_node, end_node in connections:
+             print(f"  -> Traced Wire: {start_node} <-> {end_node}")
+                
+    output_path = "test/debug_detected_grid.jpg"
+    cv2.imwrite(output_path, vis_image)
+    print(f"\nSaved analysis visualization to {output_path}")
 
 if __name__ == "__main__":
     main()
