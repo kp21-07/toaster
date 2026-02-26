@@ -1,0 +1,4 @@
+[ ] Brown is being recognised as Orange
+[ ] Integrate the graycode detection and wire detection scripts
+[ ] Test on multiple types of images for accuracy and robustness
+[ ] Integrate into backend
