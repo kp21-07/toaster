@@ -299,9 +299,9 @@ def main(image_path: str):
         for start_node, end_node in connections:
             print(f"  -> Traced Wire: {start_node} <-> {end_node}")
                 
-    output_path = "test/debug_detected_grid.jpg"
+    output_path = "test/Wiretest/debug_detected_grid.jpg"
     cv2.imwrite(output_path, vis_image)
     print(f"\nSaved analysis visualization to {output_path}")
 
 if __name__ == "__main__":
-    main("test/image4.png")
+    main("test/Wiretest/test_data/image4.png")
