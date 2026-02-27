@@ -6,7 +6,7 @@ disp_scale_factor = 0.5
 
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-img_path = os.path.join(script_dir, r'Data/IMG_20260218_014446548.jpg')
+img_path = os.path.join(script_dir, r'TestData/IMG_20260218_014446548.jpg')
 img = cv2.imread(img_path)
 
 def Warper(img):
@@ -33,9 +33,11 @@ def Warper(img):
     
     areas = np.array([i['m00'] for i in moments])
     areamean = np.mean(areas)
-    #filtered_markers = 
 
-    centers = np.array([[int(i['m10']/i['m00']), int(i['m01']/i['m00'])] for i in moments])
+    filtered_moments = filter(lambda x:x['m00']>areamean,moments)
+    filtered_markers = markers[np.where(areas>areamean)]
+
+    centers = np.array([[int(i['m10']/i['m00']), int(i['m01']/i['m00'])] for i in filtered_moments])
     s = centers.sum(axis=1)
 
     diff = np.diff(centers, axis = 1)
@@ -48,7 +50,7 @@ def Warper(img):
     # np.savetxt("Hierarchy(less_blurred).txt",hierarchy[0],"%4d")
     # np.savetxt("Filtered_contours.txt",hierarchy[0][markers],"%4d")
 
-    cv2.drawContours(img,[contours[i-1] for i in markers],-1,(0,255,0),3)
+    cv2.drawContours(img,[contours[i-1] for i in filtered_markers],-1,(0,255,0),3)
     cv2.imshow("testimage1",cv2.resize(img,None,fx=disp_scale_factor,fy=disp_scale_factor))
     cv2.waitKey(0)
 
@@ -59,21 +61,21 @@ def Warper(img):
 warped = Warper(img)
 
 
-grey_code_samples = [12,30,47,65]
+grey_code_samples_4bit = [12,30,47,65]
 sample_size = 3
 
 ret,thresh1 = cv2.threshold(cv2.cvtColor(warped,cv2.COLOR_BGR2GRAY),127,255,cv2.THRESH_BINARY)
-# for i in grey_code_samples:
+# for i in grey_code_samples_4bit:
 #     cv2.circle(thresh1,(80,i),4,(0,0,0),thickness=3)
 
 current_code = np.zeros(4)
 with open(r"codes.txt",'w+') as file:
     for i in range(50,thresh1.shape[1]-70):
-        code_val = thresh1[grey_code_samples,i]/255
+        code_val = thresh1[grey_code_samples_4bit,i]/255
         if (code_val!= current_code).any():
             current_code = code_val
             file.write(str(code_val)+"\n")
-            for j in grey_code_samples:
+            for j in grey_code_samples_4bit:
                 cv2.circle(warped,(i,j),4,(0,0,0),thickness=3)
         
         #sum(int(bin(current_code)[2:]))
