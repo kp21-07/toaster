@@ -131,6 +131,9 @@ def analyze_nodes(mask: np.ndarray, holes: List[HoleCoord], cell_w: int, cell_h:
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     bounding_rects = [cv2.boundingRect(c) for c in contours if cv2.contourArea(c) > 10]
     
+    if not bounding_rects:
+        return endpoints, pass_throughs
+    
     for (hx, hy) in holes:
         inside_bbox = False
         for (rx, ry, rw, rh) in bounding_rects:
@@ -188,6 +191,54 @@ def analyze_nodes(mask: np.ndarray, holes: List[HoleCoord], cell_w: int, cell_h:
                 
     return endpoints, pass_throughs
 
+def get_neighbors(curr: HoleCoord, prev_dir: Tuple[int, int], active_edges: EdgeList, all_coords: set, visited: set) -> List[Tuple[HoleCoord, Tuple[int, int]]]:
+    import math
+    candidates = []
+    for node in all_coords:
+        if node not in visited:
+            dist = math.hypot(node[0] - curr[0], node[1] - curr[1])
+            if dist < 65:
+                dx = node[0] - curr[0]
+                dy = node[1] - curr[1]
+                candidates.append((dist, node, dx, dy))
+                
+    candidates.sort(key=lambda x: x[0]) # Closest first
+    
+    if prev_dir == (0, 0):
+        return [(node, (dx, dy)) for dist, node, dx, dy in candidates]
+        
+    if abs(prev_dir[0]) > abs(prev_dir[1]):
+        entry_edge = 'left' if prev_dir[0] > 0 else 'right'
+        opp_edge = 'right' if prev_dir[0] > 0 else 'left'
+    else:
+        entry_edge = 'top' if prev_dir[1] > 0 else 'bottom'
+        opp_edge = 'bottom' if prev_dir[1] > 0 else 'top'
+        
+    def is_valid_for_edge(target_edge, dx, dy):
+        if target_edge == 'right'  and (dx <= 0 or abs(dy) > abs(dx)): return False
+        if target_edge == 'left'   and (dx >= 0 or abs(dy) > abs(dx)): return False
+        if target_edge == 'bottom' and (dy <= 0 or abs(dx) > abs(dy)): return False
+        if target_edge == 'top'    and (dy >= 0 or abs(dx) > abs(dy)): return False
+        return True
+
+    straight_candidates = []
+    turn_candidates = []
+    
+    # Priority 1: Straight momentum
+    if opp_edge in active_edges:
+        for dist, node, dx, dy in candidates:
+            if is_valid_for_edge(opp_edge, dx, dy):
+                straight_candidates.append((node, (dx, dy)))
+                
+    # Priority 2: Turns
+    turn_edges = [e for e in active_edges if e not in (entry_edge, opp_edge)]
+    for turn_edge in turn_edges:
+        for dist, node, dx, dy in candidates:
+            if is_valid_for_edge(turn_edge, dx, dy):
+                turn_candidates.append((node, (dx, dy)))
+                
+    return straight_candidates + turn_candidates
+
 def trace_wires(endpoints_data: List[NodeData], pass_throughs_data: List[NodeData]) -> Tuple[List[WireConnection], List[WirePath]]:
     """DFS search across nodes to connect Endpoints, enforcing momentum at intersections."""
     import math
@@ -211,42 +262,18 @@ def trace_wires(endpoints_data: List[NodeData], pass_throughs_data: List[NodeDat
         prev_dir = (0, 0)
         
         while True:
-            neighbors = []
             active_edges = node_edges[curr]
-            is_intersection = len(active_edges) > 2
+            ranked_neighbors = get_neighbors(curr, prev_dir, active_edges, all_coords, visited)
             
-            for node in all_coords:
-                if node not in visited:
-                    dist = math.hypot(node[0] - curr[0], node[1] - curr[1])
-                    if dist < 65:
-                        dx = node[0] - curr[0]
-                        dy = node[1] - curr[1]
-                        
-                        valid = True
-                        if is_intersection and prev_dir != (0, 0):
-                            # Enforce straight momentum
-                            if abs(prev_dir[0]) > abs(prev_dir[1]): # Moving horizontally
-                                expected_dx = 1 if prev_dir[0] > 0 else -1
-                                if (dx > 0 and expected_dx < 0) or (dx < 0 and expected_dx > 0) or abs(dy) > abs(dx):
-                                    valid = False
-                            else: # Moving vertically
-                                expected_dy = 1 if prev_dir[1] > 0 else -1
-                                if (dy > 0 and expected_dy < 0) or (dy < 0 and expected_dy > 0) or abs(dx) > abs(dy):
-                                    valid = False
-                                    
-                        if valid:
-                            neighbors.append((dist, node, (dx, dy)))
-            
-            if not neighbors:
+            if not ranked_neighbors:
                 break
                 
-            neighbors.sort(key=lambda x: x[0])
-            next_node = neighbors[0][1]
-            prev_dir = neighbors[0][2]
+            next_node, next_dir = ranked_neighbors[0]
             
             visited.add(next_node)
             current_path.append(next_node)
             curr = next_node
+            prev_dir = next_dir
             
             # Check against original endpoints_data to see if we reached a valid terminal
             if curr in [pos for pos, _ in endpoints_data] and curr != start_node:
@@ -280,10 +307,11 @@ def main(image_path: str):
     print("Extracting color masks...")
     color_masks = extract_color_masks(image)
     
+    all_connections = []
+    all_traversals = []
+    
     for color_name, mask in color_masks.items():
-        print(f"\n--- {color_name} Wires ---")
         endpoints, pass_throughs = analyze_nodes(mask, holes, cell_w, cell_h)
-        print(f"Found {len(endpoints)} Endpoints and {len(pass_throughs)} Path Nodes.")
         
         for ep, edges in endpoints:
             cv2.circle(vis_image, ep, 6, (0, 0, 255), 2)
@@ -291,17 +319,20 @@ def main(image_path: str):
             cv2.circle(vis_image, pt, 2, (0, 255, 0), -1)
             
         connections, traversals = trace_wires(endpoints, pass_throughs)
+        all_connections.extend(connections)
+        all_traversals.extend(traversals)
         
-        for path in traversals:
-            for i in range(len(path)-1):
-                cv2.line(vis_image, path[i], path[i+1], (0, 255, 255), 2)
-                
-        for start_node, end_node in connections:
-            print(f"  -> Traced Wire: {start_node} <-> {end_node}")
+    for path in all_traversals:
+        for i in range(len(path)-1):
+            cv2.line(vis_image, path[i], path[i+1], (0, 255, 255), 2)
+            
+    print(f"\nFound {len(all_connections)} valid wire connections across all colors.")
+    for start_node, end_node in all_connections:
+        print(f"  -> Traced Wire: {start_node} <-> {end_node}")
                 
     output_path = "test/Wiretest/debug_detected_grid.jpg"
     cv2.imwrite(output_path, vis_image)
     print(f"\nSaved analysis visualization to {output_path}")
 
 if __name__ == "__main__":
-    main("test/Wiretest/test_data/image4.png")
+    main("test/Wiretest/test_data/image5.png")
