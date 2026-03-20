@@ -35,7 +35,10 @@ export const UploadArea: React.FC<UploadAreaProps> = ({ onFileSelect, isLoading 
     }
   };
   const handleClick = () => {
-    inputRef.current?.click();
+    if (inputRef.current) {
+      inputRef.current.value = '';
+      inputRef.current.click();
+    }
   };
   return (
     <div 
@@ -51,6 +54,7 @@ export const UploadArea: React.FC<UploadAreaProps> = ({ onFileSelect, isLoading 
         type="file" 
         className="hidden" 
         onChange={handleChange}
+        onClick={(e) => e.stopPropagation()}
         accept="image/*"
         style={{ display: 'none' }} 
       />
