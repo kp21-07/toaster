@@ -1,0 +1,8 @@
+[ ] Integrate the graycode detection and wire detection scripts
+[ ] Test on multiple types of images for accuracy and robustness
+[ ] Integrate into backend
+
+[ ] CRITICAL: Wire Detection Output - The CV model must output a `points: [[x,y],...]` array for detected wires so the frontend can properly draw them mapped to the 942x320 dimension layout. To simulate proper pre-formed breadboard jumper wires, the CV points output should ideally trace 90-degree orthogonal line paths.
+[ ] CRITICAL: Component Output - Ensure `box: [[x,y],[x,y],[x,y],[x,y]]` exists for components mapping to the same coordinates, along with accurate terminal label names.
+
+[ ] Improve the YOLO model for component detection

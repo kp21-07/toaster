@@ -30,6 +30,7 @@ export interface Wire {
     id: number;
     color: string;
     endpoints: string[];
+    points?: number[][];
 }
 
 // API Response

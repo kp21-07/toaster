@@ -1,0 +1,163 @@
+.virtual-breadboard-container {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.breadboard-board {
+  width: 100%;
+  aspect-ratio: 928 / 306; /* perfectly matches the SVG coordinate proportions */
+  background-color: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,0.06), 0 4px 6px -1px rgba(0,0,0,0.1);
+  position: relative;
+  overflow: hidden;
+  display: block;
+}
+
+.board-component {
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid #3b82f6;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s;
+  box-sizing: border-box; /* required so absolute width/height include the borders */
+  z-index: 2;
+}
+
+.board-component:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  border-color: #2563eb;
+  z-index: 5;
+}
+
+.board-component.selected {
+  outline: 3px solid #f59e0b;
+  border-color: #f59e0b;
+  z-index: 10;
+}
+
+.comp-name {
+  font-weight: 700;
+  color: #1e293b;
+  font-size: 1.1rem;
+}
+
+.comp-value {
+  color: #64748b;
+  font-size: 0.9rem;
+  margin-top: 4px;
+}
+
+/* Modal Overlay Styles */
+.modal-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 9998;
+}
+
+.edit-popover {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+  border: 1px solid #e2e8f0;
+  width: 320px;
+  z-index: 9999;
+  animation: modalFadeIn 0.15s ease-out;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: translate(-50%, -45%); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+.edit-popover h4 {
+  margin: 0 0 1.25rem 0;
+  font-size: 1.25rem;
+  color: #0f172a;
+}
+
+.edit-field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 1rem;
+}
+
+.edit-field label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 0.4rem;
+}
+
+.edit-field input {
+  padding: 0.6rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.edit-field input:focus {
+  border-color: #3b82f6;
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.75rem;
+}
+
+.btn-cancel, .btn-save {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: background 0.2s;
+}
+
+.btn-cancel {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.btn-cancel:hover {
+  background: #e2e8f0;
+}
+
+.btn-save {
+  background: #3b82f6;
+  color: white;
+}
+
+.btn-save:hover {
+  background: #2563eb;
+}
+
+.comp-pin-label {
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.board-component:hover .comp-pin-label,
+.board-component.selected .comp-pin-label {
+  opacity: 1;
+}
