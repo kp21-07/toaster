@@ -2,7 +2,10 @@ export const pitch = 14;
 export const paddingX = 30;
 export const paddingY = 20;
 
-export const validRowIndices = [1, 2, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 17, 18];
+export const validRowIndices = [
+   1, 2, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 17, 18,
+   21, 22, 24, 25, 26, 27, 28, 31, 32, 33, 34, 35, 37, 38
+];
 
 export const snapToHole = (x: number, y: number) => {
    let col = Math.round((x - paddingX) / pitch);

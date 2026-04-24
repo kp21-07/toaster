@@ -7,7 +7,7 @@
 
 .breadboard-board {
   width: 100%;
-  aspect-ratio: 928 / 306; /* perfectly matches the SVG coordinate proportions */
+  aspect-ratio: 928 / 586; /* perfectly matches the SVG coordinate proportions */
   background-color: #f8fafc;
   border: 1px solid #cbd5e1;
   border-radius: 8px;

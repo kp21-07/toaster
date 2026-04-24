@@ -11,6 +11,13 @@ export function getPhysicalNodeId(x: number, y: number): string {
     if (row >= 11 && row <= 15) return `BotTerminal_${col}`;
     if (row === 17) return 'PowerBot+';
     if (row === 18) return 'Ground-';
+
+    if (row === 21) return 'B2_Power+';
+    if (row === 22) return 'B2_PowerTop-';
+    if (row >= 24 && row <= 28) return `B2_TopTerminal_${col}`;
+    if (row >= 31 && row <= 35) return `B2_BotTerminal_${col}`;
+    if (row === 37) return 'B2_PowerBot+';
+    if (row === 38) return 'B2_Ground-';
     
     return `Unknown_${col}_${row}`;
 }
@@ -30,9 +37,9 @@ class UnionFind {
         let rootJ = this.find(j);
         if (rootI !== rootJ) {
             // Priority ordering ensures nodes like "Power+" or "Ground-" dominate over arbitrary aliases
-            if (rootI.startsWith('Power') || rootI.startsWith('Ground')) {
+            if (rootI.includes('Power') || rootI.includes('Ground')) {
                 this.parent[rootJ] = rootI;
-            } else if (rootJ.startsWith('Power') || rootJ.startsWith('Ground')) {
+            } else if (rootJ.includes('Power') || rootJ.includes('Ground')) {
                 this.parent[rootI] = rootJ;
             } else {
                 this.parent[rootI] = rootJ;
@@ -80,11 +87,11 @@ export function buildRoutingGraph(components: CircuitComponent[], wires: Wire[])
 
     const getNodeName = (rawNodeId: string) => {
         if (!activeNodes.has(rawNodeId)) {
-            if (rawNodeId.startsWith('Power') || rawNodeId.startsWith('Ground')) return rawNodeId;
+            if (rawNodeId.includes('Power') || rawNodeId.includes('Ground')) return rawNodeId;
             return '?';
         }
         const rootGroup = uf.find(rawNodeId);
-        if (rootGroup.startsWith('Power') || rootGroup.startsWith('Ground')) return rootGroup;
+        if (rootGroup.includes('Power') || rootGroup.includes('Ground')) return rootGroup;
         if (!nodeAliasMap[rootGroup]) {
             nodeAliasMap[rootGroup] = `Node${String.fromCharCode(64 + nodeCounter)}`;
             nodeCounter++;

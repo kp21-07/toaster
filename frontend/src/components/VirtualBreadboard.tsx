@@ -4,6 +4,7 @@ import './VirtualBreadboard.css';
 import { BreadboardBackground } from './BreadboardBackground';
 import { snapToHole, pitch, paddingX, paddingY } from '../utils/breadboardMath';
 import { buildRoutingGraph, getPhysicalNodeId } from '../utils/breadboardRouter';
+import { generateVisualPath, manhattanize } from '../utils/wirePathing';
 
 
 
@@ -34,15 +35,20 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
      for(let g=0; g<10; g++) {
         for(let h=0; h<5; h++) {
            const col = 2 + g*6 + h;
-           holes.push({ x: paddingX + col * pitch, y: paddingY + 1 * pitch, id: getPhysicalNodeId(paddingX + col * pitch, paddingY + 1 * pitch) });
-           holes.push({ x: paddingX + col * pitch, y: paddingY + 2 * pitch, id: getPhysicalNodeId(paddingX + col * pitch, paddingY + 2 * pitch) });
-           holes.push({ x: paddingX + col * pitch, y: paddingY + 17 * pitch, id: getPhysicalNodeId(paddingX + col * pitch, paddingY + 17 * pitch) });
-           holes.push({ x: paddingX + col * pitch, y: paddingY + 18 * pitch, id: getPhysicalNodeId(paddingX + col * pitch, paddingY + 18 * pitch) });
+           [0, 20].forEach(offset => {
+               holes.push({ x: paddingX + col * pitch, y: paddingY + (1 + offset) * pitch, id: getPhysicalNodeId(paddingX + col * pitch, paddingY + (1 + offset) * pitch) });
+               holes.push({ x: paddingX + col * pitch, y: paddingY + (2 + offset) * pitch, id: getPhysicalNodeId(paddingX + col * pitch, paddingY + (2 + offset) * pitch) });
+               holes.push({ x: paddingX + col * pitch, y: paddingY + (17 + offset) * pitch, id: getPhysicalNodeId(paddingX + col * pitch, paddingY + (17 + offset) * pitch) });
+               holes.push({ x: paddingX + col * pitch, y: paddingY + (18 + offset) * pitch, id: getPhysicalNodeId(paddingX + col * pitch, paddingY + (18 + offset) * pitch) });
+           });
         }
      }
      for(let col=0; col<63; col++) {
-        [4,5,6,7,8,11,12,13,14,15].forEach(row => {
-           holes.push({ x: paddingX + col * pitch, y: paddingY + row * pitch, id: getPhysicalNodeId(paddingX + col * pitch, paddingY + row * pitch) });
+        [0, 20].forEach(offset => {
+           [4,5,6,7,8,11,12,13,14,15].forEach(r => {
+              const row = r + offset;
+              holes.push({ x: paddingX + col * pitch, y: paddingY + row * pitch, id: getPhysicalNodeId(paddingX + col * pitch, paddingY + row * pitch) });
+           });
         });
      }
      return holes;
@@ -108,7 +114,7 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
      const rect = boardRef.current.getBoundingClientRect();
      return {
         x: ((e.clientX - rect.left) / rect.width) * 928,
-        y: ((e.clientY - rect.top) / rect.height) * 306
+        y: ((e.clientY - rect.top) / rect.height) * 586
      };
   };
 
@@ -268,7 +274,7 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
 
         {/* Network Connection Highlights */}
         {hoverHole && !draggingItem && (
-          <svg viewBox="0 0 928 306" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1, pointerEvents: 'none' }} preserveAspectRatio="none">
+          <svg viewBox="0 0 928 586" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1, pointerEvents: 'none' }} preserveAspectRatio="none">
              {allHoles.filter(h => routing.isConnected(hoverHole.id, h.id)).map((h, i) => (
                  <circle key={`net-${i}`} cx={h.x} cy={h.y} r="5" fill="#22c55e" opacity="0.6" style={{ filter: 'drop-shadow(0 0 3px #22c55e)' }} />
              ))}
@@ -280,10 +286,18 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
         )}
 
         {/* Wires Overlay */}
-        <svg viewBox="0 0 928 306" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 7, pointerEvents: 'none' }} preserveAspectRatio="none">
+        <svg viewBox="0 0 928 586" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 7, pointerEvents: 'none' }} preserveAspectRatio="none">
            {drawingTempWire && (
              <g>
-               <path d={`M ${drawingTempWire.points[0][0]} ${drawingTempWire.points[0][1]} L ${drawingTempWire.points[1][0]} ${drawingTempWire.points[1][1]}`} fill="none" stroke={drawingTempWire.color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(1px 2px 2px rgba(0,0,0,0.3))' }} />
+               <path 
+                 d={generateVisualPath(manhattanize(drawingTempWire.points, localComponents))} 
+                 fill="none" 
+                 stroke={drawingTempWire.color} 
+                 strokeWidth="4" 
+                 strokeLinecap="round" 
+                 strokeLinejoin="round" 
+                 style={{ filter: 'drop-shadow(1px 3px 3px rgba(0,0,0,0.4))' }} 
+               />
                <circle cx={drawingTempWire.points[0][0]} cy={drawingTempWire.points[0][1]} r="4" fill="white" stroke={drawingTempWire.color} strokeWidth="2" />
                <circle cx={drawingTempWire.points[1][0]} cy={drawingTempWire.points[1][1]} r="4" fill="white" stroke={drawingTempWire.color} strokeWidth="2" />
              </g>
@@ -291,7 +305,9 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
            {localWires.map(w => {
               if(!w.points || w.points.length < 2) return null;
               
-              const pathData = (w.points as number[][]).map((p: number[], i: number) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ');
+              const endpoints = [w.points![0], w.points![w.points!.length - 1]];
+              const manhattanPoints = manhattanize(endpoints, localComponents);
+              const pathData = generateVisualPath(manhattanPoints);
               
               return (
                 <g key={`wire-group-${w.id}`}>
@@ -302,10 +318,17 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
                     strokeWidth="4" 
                     strokeLinecap="round" 
                     strokeLinejoin="round" 
-                    style={{ filter: 'drop-shadow(1px 2px 2px rgba(0,0,0,0.3))' }}
+                    style={{ 
+                       filter: 'drop-shadow(1px 3px 3px rgba(0,0,0,0.4))',
+                       transition: 'stroke 0.2s ease'
+                    }}
                   />
-                  {w.points.map((p: number[], i: number) => (
-                    <g key={`handle-group-${i}`}>
+                  {w.points!.map((p: number[], i: number) => {
+                    const isEndpoint = i === 0 || i === w.points!.length - 1;
+                    if (!isEndpoint) return null;
+
+                    return (
+                      <g key={`handle-group-${i}`}>
                       {/* Subtle Visual Handle */}
                       <circle cx={p[0]} cy={p[1]} r="4" fill="white" stroke={w.color || '#94a3b8'} strokeWidth="2" style={{ pointerEvents: 'none' }} />
                       
@@ -328,16 +351,17 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
                            if (onWiresUpdate) onWiresUpdate(updated);
                         }}
                       />
-                    </g>
-                  ))}
-                </g>
+                      </g>
+                    );
+                  })}
+                 </g>
               );
            })}
         </svg>
 
         {/* Snap Previews Overlay */}
         {snapPreviews.length > 0 && (
-          <svg viewBox="0 0 928 306" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 6, pointerEvents: 'none' }} preserveAspectRatio="none">
+          <svg viewBox="0 0 928 586" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 6, pointerEvents: 'none' }} preserveAspectRatio="none">
              {snapPreviews.map((pre, i) => (
                  <circle key={`snap-${i}`} cx={pre.x} cy={pre.y} r="6" fill="rgba(250, 204, 21, 0.4)" stroke="#eab308" strokeWidth="2" style={{ filter: 'drop-shadow(0 0 2px #eab308)' }} />
              ))}
@@ -361,9 +385,9 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
               isSlim = hPx <= 35 || wPx > hPx * 2;
 
               const left = (minX / 928) * 100;
-              const top = (minY / 306) * 100;
+              const top = (minY / 586) * 100;
               const wPercent = (wPx / 928) * 100;
-              const hPercent = (hPx / 306) * 100;
+              const hPercent = (hPx / 586) * 100;
 
               style = {
                 position: 'absolute',
