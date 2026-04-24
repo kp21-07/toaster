@@ -111,182 +111,110 @@ def extract_color_masks(image: np.ndarray) -> Dict[str, np.ndarray]:
     }
     
     color_masks = {}
-    kernel = np.ones((3, 3), np.uint8)
+    kernel_open = np.ones((3, 3), np.uint8)
+    kernel_close = np.ones((15, 15), np.uint8)
     for color_name, ranges in color_ranges.items():
         color_mask = np.zeros((height, width), dtype=np.uint8)
         for lower, upper in ranges:
             mask = cv2.inRange(hsv, lower, upper)
             color_mask = cv2.bitwise_or(color_mask, mask)
-        color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_OPEN, kernel)
+        # Close to connect broken segments of the same wire
+        color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, kernel_close)
+        # Open to remove noise
+        color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_OPEN, kernel_open)
         color_masks[color_name] = color_mask
     return color_masks
 
-def analyze_nodes(mask: np.ndarray, holes: List[HoleCoord], cell_w: int, cell_h: int) -> Tuple[List[NodeData], List[NodeData]]:
-    """Analyzes perimeter crossings of each grid cell to find Endpoints and Path Nodes."""
-    height, width = mask.shape
-    endpoints = []
-    pass_throughs = []
+def extract_wires(mask: np.ndarray, holes: List[HoleCoord]) -> List[WireConnection]:
+    """
+    Finds individual wires in a color mask by identifying connected components,
+    finding their endpoints using BFS, and snapping to the nearest hole.
+    """
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
     
-    # Contour bounding box optimization
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    bounding_rects = [cv2.boundingRect(c) for c in contours if cv2.contourArea(c) > 10]
+    connections = []
     
-    if not bounding_rects:
-        return endpoints, pass_throughs
-    
-    for (hx, hy) in holes:
-        inside_bbox = False
-        for (rx, ry, rw, rh) in bounding_rects:
-            if (rx - cell_w) <= hx <= (rx + rw + cell_w) and (ry - cell_h) <= hy <= (ry + rh + cell_h):
-                inside_bbox = True
-                break
-                
-        if not inside_bbox:
+    for i in range(1, num_labels):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area < 100: # Ignore noise
             continue
             
-        x1 = max(0         , hx - cell_w // 2)
-        y1 = max(0         , hy - cell_h // 2)
-        x2 = min(width  - 1, hx + cell_w // 2)
-        y2 = min(height - 1, hy + cell_h // 2)
+        comp_mask = (labels == i).astype(np.uint8)
         
-        cell_roi = mask[y1:y2+1, x1:x2+1]
-        area = np.count_nonzero(cell_roi)
-        if area == 0:
+        pts = np.argwhere(comp_mask > 0)
+        if len(pts) == 0:
             continue
-            
-        top    = mask[y1, x1:x2+1]
-        bottom = mask[y2, x1:x2+1]
-        left   = mask[y1:y2+1, x1]
-        right  = mask[y1:y2+1, x2]
+        start_pt = (int(pts[0][1]), int(pts[0][0]))
         
-        # Helper to check if an edge has an active crossing
-        def has_crossing(edge_array):
-            binary = (edge_array > 127).astype(np.int8)
-            # A crossing is when there is at least one transition from 0 to 1, or if the edge starts active
-            closed = np.append(binary, 0) # Close it to force a drop off
-            return np.sum(np.diff(closed) == 1) > 0 or binary[0] == 1
+        from collections import deque
+        def bfs_furthest(m, start):
+            h, w = m.shape
+            visited = np.zeros((h, w), dtype=bool)
+            q = deque([start])
+            visited[start[1], start[0]] = True
+            last_pt = start
             
-        active_edges = []
-        if has_crossing(top)   : active_edges.append('top')
-        if has_crossing(bottom): active_edges.append('bottom')
-        if has_crossing(left)  : active_edges.append('left')
-        if has_crossing(right) : active_edges.append('right')
+            dx = [-1, 1, 0, 0, -1, -1, 1, 1]
+            dy = [0, 0, -1, 1, -1, 1, -1, 1]
+            
+            while q:
+                x, y = q.popleft()
+                last_pt = (x, y)
+                for j in range(8):
+                    nx, ny = x + dx[j], y + dy[j]
+                    if 0 <= nx < w and 0 <= ny < h:
+                        if m[ny, nx] > 0 and not visited[ny, nx]:
+                            visited[ny, nx] = True
+                            q.append((nx, ny))
+            return last_pt
+            
+        E1 = bfs_furthest(comp_mask, start_pt)
+        E2 = bfs_furthest(comp_mask, E1)
         
-        crossings = len(active_edges)
+        def nearest_hole(pt):
+            return min(holes, key=lambda h: (h[0]-pt[0])**2 + (h[1]-pt[1])**2)
+            
+        if holes:
+            H1 = nearest_hole(E1)
+            H2 = nearest_hole(E2)
+            
+            if H1 != H2:
+                connections.append((H1, H2))
                 
-        if crossings == 1:
-            if area > 50:
-                M = cv2.moments(cell_roi)
-                if M["m00"] != 0:
-                    cX = int(M["m10"] / M["m00"])
-                    cY = int(M["m01"] / M["m00"])
-                    h_roi, w_roi = cell_roi.shape
-                    dist_to_center = np.sqrt((cX - w_roi // 2)**2 + (cY - h_roi // 2)**2)
+    # Post-processing: Merge broken segments of occluded wires that snapped to the same hole
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(connections)):
+            for j in range(i + 1, len(connections)):
+                c1 = connections[i]
+                c2 = connections[j]
+                
+                shared = False
+                if c1[0] == c2[0]:
+                    new_conn = (c1[1], c2[1])
+                    shared = True
+                elif c1[0] == c2[1]:
+                    new_conn = (c1[1], c2[0])
+                    shared = True
+                elif c1[1] == c2[0]:
+                    new_conn = (c1[0], c2[1])
+                    shared = True
+                elif c1[1] == c2[1]:
+                    new_conn = (c1[0], c2[0])
+                    shared = True
                     
-                    if dist_to_center < 8:
-                        endpoints.append(((hx, hy), active_edges))
-        elif crossings >= 2:
-            if area > 5:
-                pass_throughs.append(((hx, hy), active_edges))
-                
-    return endpoints, pass_throughs
-
-def get_neighbors(curr: HoleCoord, prev_dir: Tuple[int, int], active_edges: EdgeList, all_coords: set, visited: set) -> List[Tuple[HoleCoord, Tuple[int, int]]]:
-    import math
-    candidates = []
-    for node in all_coords:
-        if node not in visited:
-            dist = math.hypot(node[0] - curr[0], node[1] - curr[1])
-            if dist < 65:
-                dx = node[0] - curr[0]
-                dy = node[1] - curr[1]
-                candidates.append((dist, node, dx, dy))
-                
-    candidates.sort(key=lambda x: x[0]) # Closest first
-    
-    if prev_dir == (0, 0):
-        return [(node, (dx, dy)) for dist, node, dx, dy in candidates]
-        
-    if abs(prev_dir[0]) > abs(prev_dir[1]):
-        entry_edge = 'left' if prev_dir[0] > 0 else 'right'
-        opp_edge = 'right' if prev_dir[0] > 0 else 'left'
-    else:
-        entry_edge = 'top' if prev_dir[1] > 0 else 'bottom'
-        opp_edge = 'bottom' if prev_dir[1] > 0 else 'top'
-        
-    def is_valid_for_edge(target_edge, dx, dy):
-        if target_edge == 'right'  and (dx <= 0 or abs(dy) > abs(dx)): return False
-        if target_edge == 'left'   and (dx >= 0 or abs(dy) > abs(dx)): return False
-        if target_edge == 'bottom' and (dy <= 0 or abs(dx) > abs(dy)): return False
-        if target_edge == 'top'    and (dy >= 0 or abs(dx) > abs(dy)): return False
-        return True
-
-    straight_candidates = []
-    turn_candidates = []
-    
-    # Priority 1: Straight momentum
-    if opp_edge in active_edges:
-        for dist, node, dx, dy in candidates:
-            if is_valid_for_edge(opp_edge, dx, dy):
-                straight_candidates.append((node, (dx, dy)))
-                
-    # Priority 2: Turns
-    turn_edges = [e for e in active_edges if e not in (entry_edge, opp_edge)]
-    for turn_edge in turn_edges:
-        for dist, node, dx, dy in candidates:
-            if is_valid_for_edge(turn_edge, dx, dy):
-                turn_candidates.append((node, (dx, dy)))
-                
-    return straight_candidates + turn_candidates
-
-def trace_wires(endpoints_data: List[NodeData], pass_throughs_data: List[NodeData]) -> Tuple[List[WireConnection], List[WirePath]]:
-    """DFS search across nodes to connect Endpoints, enforcing momentum at intersections."""
-    import math
-    node_edges = {pos: edges for pos, edges in endpoints_data + pass_throughs_data}
-    all_coords = set(node_edges.keys())
-    
-    # Exclude endpoints that start as intersections (4-way overlapping directly on a hole)
-    # as they don't have a clear starting momentum.
-    unvisited_endpoints = set(pos for pos, edges in endpoints_data if len(edges) <= 2)
-    
-    wire_connections = []
-    node_traversals = [] 
-    
-    while unvisited_endpoints:
-        start_node = unvisited_endpoints.pop()
-        current_path = [start_node]
-        visited = {start_node}
-        
-        curr = start_node
-        found_end = None
-        prev_dir = (0, 0)
-        
-        while True:
-            active_edges = node_edges[curr]
-            ranked_neighbors = get_neighbors(curr, prev_dir, active_edges, all_coords, visited)
-            
-            if not ranked_neighbors:
+                if shared:
+                    connections.pop(j)
+                    connections.pop(i)
+                    if new_conn[0] != new_conn[1]:
+                        connections.append(new_conn)
+                    merged = True
+                    break
+            if merged:
                 break
                 
-            next_node, next_dir = ranked_neighbors[0]
-            
-            visited.add(next_node)
-            current_path.append(next_node)
-            curr = next_node
-            prev_dir = next_dir
-            
-            # Check against original endpoints_data to see if we reached a valid terminal
-            if curr in [pos for pos, _ in endpoints_data] and curr != start_node:
-                found_end = curr
-                break
-                
-        if found_end:
-            wire_connections.append((start_node, found_end))
-            if found_end in unvisited_endpoints:
-                unvisited_endpoints.remove(found_end)
-        node_traversals.append(current_path)
-        
-    return wire_connections, node_traversals
+    return connections
 
 def main(image_path: str):
     image = cv2.imread(image_path)
@@ -308,23 +236,18 @@ def main(image_path: str):
     color_masks = extract_color_masks(image)
     
     all_connections = []
-    all_traversals = []
     
     for color_name, mask in color_masks.items():
-        endpoints, pass_throughs = analyze_nodes(mask, holes, cell_w, cell_h)
+        connections = extract_wires(mask, holes)
         
-        for ep, edges in endpoints:
-            cv2.circle(vis_image, ep, 6, (0, 0, 255), 2)
-        for pt, edges in pass_throughs:
-            cv2.circle(vis_image, pt, 2, (0, 255, 0), -1)
+        for start_node, end_node in connections:
+            cv2.circle(vis_image, start_node, 6, (0, 0, 255), 2)
+            cv2.circle(vis_image, end_node, 6, (0, 0, 255), 2)
             
-        connections, traversals = trace_wires(endpoints, pass_throughs)
         all_connections.extend(connections)
-        all_traversals.extend(traversals)
         
-    for path in all_traversals:
-        for i in range(len(path)-1):
-            cv2.line(vis_image, path[i], path[i+1], (0, 255, 255), 2)
+    for start_node, end_node in all_connections:
+        cv2.line(vis_image, start_node, end_node, (0, 255, 255), 2)
             
     print(f"\nFound {len(all_connections)} valid wire connections across all colors.")
     for start_node, end_node in all_connections:
@@ -335,4 +258,4 @@ def main(image_path: str):
     print(f"\nSaved analysis visualization to {output_path}")
 
 if __name__ == "__main__":
-    main("test/Wiretest/test_data/image5.png")
+    main("test/Wiretest/test_data/image6.png")
