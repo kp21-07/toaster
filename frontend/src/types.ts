@@ -37,7 +37,9 @@ export interface Wire {
 export interface AnalysisResponse {
     components: CircuitComponent[];
     wires: Wire[];
+    grey_codes: any[]; // Anchors list
     netlist: string;
+    detected_corners?: number[][] | null;
     annotated_image?: string | null;
     warped_image?: string | null;
 }

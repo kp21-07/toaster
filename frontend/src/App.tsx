@@ -7,8 +7,9 @@ import { ComponentList } from './components/ComponentList';
 import { VirtualBreadboard } from './components/VirtualBreadboard';
 import { analyzeImage } from './api/client';
 import type { AnalysisResponse, CircuitComponent } from './types';
-import { RefreshCw, Plus, Undo, Redo, Download, Upload } from 'lucide-react';
+import { RefreshCw, Plus, Undo, Redo, Download, Upload, Target } from 'lucide-react';
 import { autoRouteCircuit } from './utils/breadboardRouter';
+import { CalibrationOverlay } from './components/CalibrationOverlay';
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
@@ -18,6 +19,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isDrawingWire, setIsDrawingWire] = useState(false);
   const [showAddPopover, setShowAddPopover] = useState(false);
+  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [showPhotoOverlay, setShowPhotoOverlay] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', type: 'resistor', value: '1k' });
 
   const updateDataWithHistory = (newData: AnalysisResponse | ((prev: AnalysisResponse | null) => AnalysisResponse | null)) => {
@@ -62,19 +65,26 @@ function App() {
 
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile);
-    setIsLoading(true);
     setData(null);
     setHistory([]);
     setFuture([]);
+    // Mandatory Calibration: Open the overlay instead of analyzing immediately
+    setIsCalibrating(true);
+  };
 
+  const handleCalibrationComplete = async (points: number[][]) => {
+    if (!file) return;
+    setIsCalibrating(false);
+    setIsLoading(true);
     try {
-      // Send the image to the backend and grab the response directly 
-      const result = await analyzeImage(selectedFile);
+      const result = await analyzeImage(file, points);
       setData(result);
-      toast.success("Analysis complete!");
+      setHistory([]);
+      setFuture([]);
+      toast.success("Calibration applied and re-analyzed!");
     } catch (err: any) {
       console.error(err);
-      toast.error(err.response?.data?.detail || err.message || "Failed to process the input.");
+      toast.error(err.response?.data?.detail || "Calibration failed.");
     } finally {
       setIsLoading(false);
     }
@@ -221,6 +231,13 @@ function App() {
   return (
     <div className="app-container">
       {/* Global Modals */}
+      {isCalibrating && file && (
+        <CalibrationOverlay 
+          imageFile={file} 
+          onCalibrationComplete={handleCalibrationComplete}
+          onCancel={() => setIsCalibrating(false)}
+        />
+      )}
       {showAddPopover && (
         <div className="modal-backdrop" onClick={() => setShowAddPopover(false)}>
           <div className="edit-popover" onClick={e => e.stopPropagation()}>
@@ -281,6 +298,12 @@ function App() {
            <div style={{ position: 'absolute', right: '0', display: 'flex', gap: '0.5rem' }}>
              <button onClick={handleExportJson} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Save Project locally">
                <Download size={16} /> Save
+             </button>
+             <button onClick={() => setShowPhotoOverlay(!showPhotoOverlay)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: showPhotoOverlay ? '#3b82f6' : '#f8fafc', color: showPhotoOverlay ? 'white' : '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Show original photo under the grid">
+               <Target size={16} /> {showPhotoOverlay ? 'Hide Photo' : 'Show Photo'}
+             </button>
+             <button onClick={() => setIsCalibrating(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: '#f8fafc', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Manually calibrate board corners">
+               <Target size={16} /> Calibrate
              </button>
              <label htmlFor="import-json" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Load Project">
                <Upload size={16} /> Load
@@ -378,6 +401,7 @@ function App() {
                 components={data.components} 
                 wires={data.wires}
                 isDrawingWire={isDrawingWire}
+                warpedImage={showPhotoOverlay ? data.warped_image : undefined}
                 onWireDrawn={() => setIsDrawingWire(false)}
                 onComponentsUpdate={handleComponentsUpdate} 
                 onWiresUpdate={(newWires) => updateDataWithHistory(prev => prev ? { ...prev, wires: newWires } : prev)}

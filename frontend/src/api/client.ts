@@ -10,9 +10,12 @@ const apiClient = axios.create({
     },
 });
 
-export const analyzeImage = async (file: File): Promise<AnalysisResponse> => {
+export const analyzeImage = async (file: File, calibrationPoints?: number[][]): Promise<AnalysisResponse> => {
     const formData = new FormData();
     formData.append('file', file);
+    if (calibrationPoints) {
+        formData.append('calibration_points', JSON.stringify(calibrationPoints));
+    }
 
     const response = await apiClient.post<AnalysisResponse>('/analyze-image', formData, {
         headers: {
@@ -20,5 +23,14 @@ export const analyzeImage = async (file: File): Promise<AnalysisResponse> => {
         },
     });
 
+    return response.data;
+};
+
+export const detectCorners = async (file: File): Promise<{ corners: number[][] }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post<{ corners: number[][] }>('/detect-corners', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
     return response.data;
 };

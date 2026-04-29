@@ -1,7 +1,11 @@
 import React from 'react';
 import { pitch, paddingX, paddingY } from '../utils/breadboardMath';
 
-export const BreadboardBackground: React.FC = () => {
+interface BreadboardBackgroundProps {
+  warpedImage?: string;
+}
+
+export const BreadboardBackground: React.FC<BreadboardBackgroundProps> = ({ warpedImage }) => {
   const width = 928;
   const height = 586;
 
@@ -23,6 +27,16 @@ export const BreadboardBackground: React.FC = () => {
       preserveAspectRatio="none"
     >
         <rect width="100%" height="100%" fill="#f8fafc" />
+        
+        {warpedImage && (
+          <image 
+            href={`data:image/jpeg;base64,${warpedImage}`} 
+            width="100%" 
+            height="100%" 
+            preserveAspectRatio="none"
+            opacity="0.6"
+          />
+        )}
 
         {[0, 20].map(yBase => (
           <g key={`breadboard-segment-${yBase}`} transform={`translate(0, ${yBase * pitch})`}>

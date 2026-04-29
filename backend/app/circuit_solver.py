@@ -18,22 +18,10 @@ def hole_to_node(hole: PhysicalHole) -> ElectricalNode:
         ElectricalNode: The canonical electrical node ID.
                        Returns empty string if input is invalid.
     """
-    if not hole : return ""
-
-    pref = hole[0]
-
-    # Rows 'A-E' are connected column wise (actually row-wise in breadboard terms, but let's say index-wise).
-    # Map all of them to 'A' + Column
-    if ord('A') <= ord(pref) < ord('F'):
-        return 'A' + hole[1:]
-
-    # Rows 'F-J' are connected column wise. Map all of them to 'F' + Column
-    elif ord('F') <= ord(pref) < ord('K'):
-        return 'F' + hole[1:]
-
-    # Power rails and others are returned as is
-    else:
-        return hole[:2]
+    if not hole: return ""
+    # The labels like "TopTerminal_11" or "Power+" are already canonical node groups
+    # so we can just return them. 
+    return hole
 
 def build_node_map(wires: List[Wire], grounds: List[PhysicalHole]) -> Tuple[Dict[ElectricalNode, NodeID], int]:
     """

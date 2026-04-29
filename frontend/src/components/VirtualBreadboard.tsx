@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { Cpu, Hash, Tag, Trash2, Crosshair } from 'lucide-react';
 import type { CircuitComponent } from '../types';
 import './VirtualBreadboard.css';
 import { BreadboardBackground } from './BreadboardBackground';
@@ -15,11 +16,21 @@ interface VirtualBreadboardProps {
   onWireDrawn?: () => void;
   onComponentsUpdate: (newComponents: CircuitComponent[]) => void;
   onWiresUpdate?: (newWires: import('../types').Wire[]) => void;
+  warpedImage?: string;
 }
 
-export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components, wires = [], isDrawingWire, onWireDrawn, onComponentsUpdate, onWiresUpdate }) => {
+export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ 
+  components, 
+  wires = [], 
+  isDrawingWire, 
+  onWireDrawn, 
+  onComponentsUpdate, 
+  onWiresUpdate,
+  warpedImage 
+}) => {
   const [selectedCompId, setSelectedCompId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<CircuitComponent>>({});
+  const [pickingTerminalIdx, setPickingTerminalIdx] = useState<number | null>(null);
 
   const boardRef = React.useRef<HTMLDivElement>(null);
   const [localComponents, setLocalComponents] = useState<CircuitComponent[]>(components);
@@ -126,6 +137,15 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
            const newWireId = Math.max(0, ...localWires.map(w => w.id)) + 1;
            setDrawingTempWire({ id: newWireId, color: '#2563eb', points: [[snapped.x, snapped.y], [snapped.x, snapped.y]] });
         }
+        return;
+     }
+
+     if (pickingTerminalIdx !== null && hoverHole) {
+        const newTerminals = [...(editForm.terminals || [])];
+        newTerminals[pickingTerminalIdx] = hoverHole.id;
+        setEditForm({ ...editForm, terminals: newTerminals });
+        setPickingTerminalIdx(null);
+        return;
      }
   };
 
@@ -245,15 +265,18 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
   };
 
   const handleSave = () => {
-    const updated = components.map(c => 
+    const updated = localComponents.map(c => 
       c.id === selectedCompId ? { ...c, ...editForm } as CircuitComponent : c
     );
+    setLocalComponents(updated);
     onComponentsUpdate(updated);
     setSelectedCompId(null);
+    setPickingTerminalIdx(null);
   };
 
   const handleCancel = () => {
     setSelectedCompId(null);
+    setPickingTerminalIdx(null);
   };
 
   return (
@@ -270,7 +293,7 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
         }}
         style={{ cursor: isDrawingWire ? 'crosshair' : 'default' }}
       >
-        <BreadboardBackground />
+        <BreadboardBackground warpedImage={warpedImage} />
 
         {/* Network Connection Highlights */}
         {hoverHole && !draggingItem && (
@@ -464,59 +487,100 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({ components
         <>
           <div className="modal-backdrop" onClick={handleCancel} />
           <div className="edit-popover">
-            <h4>Edit Component</h4>
+            <div className="edit-header">
+              <Cpu size={20} color="#3b82f6" />
+              <h4>Edit Component</h4>
+            </div>
+            
             <div className="edit-field">
-              <label>Name</label>
+              <label><Tag size={14} /> Name</label>
               <input 
                 type="text" 
                 value={editForm.name || ''} 
                 onChange={e => setEditForm({...editForm, name: e.target.value})}
+                placeholder="e.g. R1"
               />
             </div>
+            
             <div className="edit-field">
-              <label>Value</label>
+              <label><Hash size={14} /> Value</label>
               <input 
                 type="text" 
                 value={editForm.value || ''} 
                 onChange={e => setEditForm({...editForm, value: e.target.value})}
+                placeholder="e.g. 10k"
               />
             </div>
+
             <div className="edit-field">
-              <label>Terminals (comma separated)</label>
-              <input 
-                type="text" 
-                value={editForm.terminals ? editForm.terminals.join(', ') : ''} 
-                onChange={e => setEditForm({...editForm, terminals: e.target.value.split(',').map(s => s.trim())})}
-              />
+              <label><Crosshair size={14} /> Terminals</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {(editForm.terminals || []).map((t, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: '0.4rem' }}>
+                    <input 
+                      type="text" 
+                      value={t} 
+                      onChange={e => {
+                        const next = [...(editForm.terminals || [])];
+                        next[idx] = e.target.value;
+                        setEditForm({...editForm, terminals: next});
+                      }}
+                      className={pickingTerminalIdx === idx ? 'picking-mode' : ''}
+                      style={{ flex: 1 }}
+                    />
+                    <button 
+                      onClick={() => setPickingTerminalIdx(pickingTerminalIdx === idx ? null : idx)}
+                      style={{ 
+                        padding: '0.4rem', 
+                        borderRadius: '8px', 
+                        border: '1px solid #cbd5e1', 
+                        background: pickingTerminalIdx === idx ? '#f59e0b' : 'white',
+                        color: pickingTerminalIdx === idx ? 'white' : '#64748b',
+                        cursor: 'pointer'
+                      }}
+                      title="Click to pick from board"
+                    >
+                      <Crosshair size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
+
             <div className="edit-field">
-              <label>Type</label>
+              <label><Cpu size={14} /> Type</label>
               <select 
                 value={editForm.type || 'resistor'} 
                 onChange={e => setEditForm({...editForm, type: e.target.value})}
-                style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.85rem', background: 'white' }}
               >
                 <option value="resistor">Resistor</option>
                 <option value="capacitor">Capacitor</option>
                 <option value="transistor">Transistor</option>
                 <option value="voltage_source">Voltage Source</option>
+                <option value="LED">LED</option>
+                <option value="IC">IC / Integrated Circuit</option>
               </select>
             </div>
-            <div className="edit-actions" style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-              <button className="btn-save" onClick={handleSave} style={{ flex: 1 }}>Apply</button>
-              <button className="btn-cancel" onClick={handleCancel} style={{ flex: 1 }}>Cancel</button>
-              <button 
-                className="btn-cancel" 
-                onClick={() => {
-                   const updated = localComponents.filter(c => c.id !== selectedCompId);
-                   setLocalComponents(updated);
-                   onComponentsUpdate(updated);
-                   setSelectedCompId(null);
-                }} 
-                style={{ background: '#fef2f2', color: '#ef4444', border: '1px solid #fca5a5', flex: 1 }}
-              >
-                Delete
+
+            <div className="edit-actions">
+              <button className="btn-save" onClick={handleSave}>
+                Apply Changes
               </button>
+              <button 
+                className="btn-delete" 
+                onClick={() => {
+                   if (window.confirm("Delete this component?")) {
+                      const updated = localComponents.filter(c => c.id !== selectedCompId);
+                      setLocalComponents(updated);
+                      onComponentsUpdate(updated);
+                      setSelectedCompId(null);
+                   }
+                }} 
+                title="Delete Component"
+              >
+                <Trash2 size={18} />
+              </button>
+              <button className="btn-cancel" onClick={handleCancel}>Cancel</button>
             </div>
           </div>
         </>

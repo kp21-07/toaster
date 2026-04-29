@@ -1,191 +1,148 @@
 import cv2
 import numpy as np
-import math
 from ultralytics import YOLO
-from typing import List, Tuple, Union, Optional
+from typing import List, Tuple, Dict, Union, Optional
+from collections import deque
+import math
 
 # --- Type Definitions ---
 Point = Tuple[float, float]
 HoleCoord = Tuple[int, int]
-BoundingBox = List[Point] # [TL, TR, BR, BL]
+WireConnection = Tuple[HoleCoord, HoleCoord]
+GreyCode = List[float]
 RawComponent = Tuple[int, str, List[List[float]]] # (class_id, class_name, corners)
-ComponentTerminals = Tuple[int, str, List[Point]] # (class_id, class_name, [pin1, pin2, ...])
-WireData = List[Union[int, str, List[str]]] # [id, name, [hole_id1, hole_id2]]
-HoleGrid = List[List[HoleCoord]]
+ComponentTerminals = Tuple[int, str, List[Point], List[List[float]]] # (class_id, class_name, [pin1, pin2, ...], original_box)
+MappedComponent = Tuple[int, str, List[str], List[HoleCoord]] # (class_id, class_name, [id1, id2, ...], [hole1, hole2, ...])
 
-def perspective_transform(image : np.ndarray, contour : np.ndarray) -> np.ndarray:
+def warp_with_points(image: np.ndarray, corners: np.ndarray) -> np.ndarray:
     """
-    Applies a 4-point perspective transform to crop and straighten the breadboard from the image.
-    
-    Args:
-        image (np.ndarray): The source image.
-        contour (np.ndarray): The 4 points of the detected breadboard outline. 
-                              Expected shape is (4, 1, 2) or (4, 2).
-        
-    Returns:
-        np.ndarray: The warped, top-down view of the breadboard.
+    Standardizes output to 928x586.
     """
-    pts = contour.reshape(4, 2)
-    rect = np.zeros((4, 2), dtype="float32")
-    s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]
-    rect[2] = pts[np.argmax(s)]
-    diff = np.diff(pts, axis=1)
-    rect[1] = pts[np.argmin(diff)]
-    rect[3] = pts[np.argmax(diff)]
- 
-    (tl, tr, br, bl) = rect
- 
-    widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
-    widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
-    maxWidth = max(int(widthA), int(widthB))
- 
-    heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
-    heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
-    maxHeight = max(int(heightA), int(heightB))
- 
-    dst = np.array([[0, 0], [maxWidth - 1, 0], [maxWidth - 1, maxHeight - 1], [0, maxHeight - 1]], dtype="float32")
- 
-    M = cv2.getPerspectiveTransform(rect, dst)
-    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
- 
+    output_dim = (928, 586)
+    # Destination points match the absolute corners of the 928x586 board area
+    dst_rect = np.array([
+        [0, 0],         # TL
+        [928, 0],       # TR
+        [928, 586],     # BR
+        [0, 586]        # BL
+    ], dtype="float32")
+
+    M = cv2.getPerspectiveTransform(corners.astype("float32"), dst_rect)
+    warped = cv2.warpPerspective(image, M, output_dim)
     return warped
 
-def detect_breadboard(image : np.ndarray) -> np.ndarray:
+def detect_and_warp(image: np.ndarray) -> Tuple[np.ndarray, List[List[float]]]:
     """
-    Detects the breadboard in the input image and returns a straightened version.
+    Finds corner markers and applies a 4-point perspective transform.
+    Returns (warped_image, detected_corners).
+    """
+    imgray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    imgray = cv2.GaussianBlur(imgray, (5, 5), 0)
+
+    ret, thresh = cv2.threshold(imgray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    if hierarchy is None:
+        raise ValueError("No markers found - could not detect hierarchy.")
+
+    mask = ((hierarchy[0][:, 0] == -1) & (hierarchy[0][:, 1] == -1) & (hierarchy[0][:, 2] == -1))
+    markers = np.where(mask)[0]
     
-    Args:
-        image (np.ndarray): The raw input image.
+    if len(markers) < 4:
+        # Fallback: try to find corners of the largest rectangle if markers fail
+        raise ValueError(f"Could not find at least 4 markers. Found {len(markers)}.")
+
+    moments = [cv2.moments(contours[i-1]) for i in markers]
+    areas = np.array([i['m00'] for i in moments])
+    areamean = np.mean(areas)
+
+    filtered_moments = [m for m in moments if m['m00'] > areamean]
+    
+    if len(filtered_moments) < 4:
+         sorted_indices = np.argsort(areas)[-4:]
+         filtered_moments = [moments[i] for i in sorted_indices]
+
+    centers = np.array([[int(i['m10']/i['m00']), int(i['m01']/i['m00'])] for i in filtered_moments])
+    
+    # Order centers: TL, TR, BR, BL
+    s = centers.sum(axis=1)
+    diff = np.diff(centers, axis=1)
+    
+    ordered_centers = np.array([
+        centers[np.argmin(s)],
+        centers[np.argmin(diff)],
+        centers[np.argmax(s)],
+        centers[np.argmax(diff)]
+    ], dtype="float32")
+
+    warped = warp_with_points(image, ordered_centers)
+    return warped, ordered_centers.tolist()
+
+def detect_holes(warped_image: np.ndarray, anchors: Optional[List[List[float]]] = None) -> Tuple[List[HoleCoord], float, float, float]:
+    """
+    Stable 6-point anchor grid calculation.
+    """
+    # Default Fallbacks
+    pitch = 14.15
+    paddingX = 26
+    paddingY = 22
+
+    if anchors and len(anchors) == 2:
+        p1 = anchors[0] # A1 (Col 0, Row 4)
+        p2 = anchors[1] # J63 (Col 62, Row 35)
         
-    Returns:
-        np.ndarray: The warped top-down view of the breadboard.
+        # 62 cols apart, 31 rows apart (35 - 4)
+        pitch_h = (p2[0] - p1[0]) / 62.0
+        pitch_v = (p2[1] - p1[1]) / 31.0
+        pitch = (pitch_h + pitch_v) / 2.0
         
-    Raises:
-        ValueError: If no suitable breadboard contour is found.
-    """
-    orig = image.copy()
-    scale = 800 / max(image.shape[:2])
-    image_resized = cv2.resize(image, None, fx=scale, fy=scale)
-    ratio = orig.shape[0] / image_resized.shape[0]
-
-    gray = cv2.cvtColor(image_resized, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray,  (5,5), 0)
-
-    edges = cv2.Canny(gray, 50, 150)
-
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
-
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        raise ValueError("No contours found in image.")
-
-    contours = sorted(contours, key = cv2.contourArea, reverse=True)
-
-    breadboard_contour = None
-    for c in contours:
-        peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        if len(approx) == 4:
-            breadboard_contour = approx
-            break
-    
-    if breadboard_contour is None:
-        raise ValueError("Could not find a rectangular breadboard contour.")
-
-    warped = perspective_transform(orig, breadboard_contour.reshape(4, 2) * ratio)
-    
-    return warped
-
-def pixel_map(image : np.ndarray) -> HoleGrid:
-    """
-    Calculates the pixel coordinates of every hole on the breadboard based on standard spacing.
-    
-    Args:
-        image (np.ndarray): The warped breadboard image (used for dimensions).
+        paddingX = p1[0]
+        paddingY = p1[1] - (4 * pitch)
         
-    Returns:
-        HoleGrid: A matrix where each element is the (x, y) coordinate of a hole.
-                  Order follows the breadboard rows logic.
+    rows_relative = [1, 2, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 17, 18]
+    row_targets = []
+    for yBase in [0, 20]:
+        for r in rows_relative:
+            row_targets.append(paddingY + (yBase + r) * pitch)
+            
+    final_holes = []
+    for ry in row_targets:
+        for cx in range(63):
+            rx = paddingX + cx * pitch
+            final_holes.append((int(rx), int(ry)))
+            
+    return final_holes, pitch, paddingX, paddingY
+
+def map_to_breadboard_ids(hole_coords: List[HoleCoord], pitch: float, paddingX: float, paddingY: float) -> List[str]:
     """
-    height, width, _ = image.shape
-
-    # BREADBOARD CONSTANTS
-    MID_LR_MARGIN = 4/165 * width
-    MID_TD_MARGIN = 13/54 * height
-
-    EDGE_LR_MARGIN = 8.5/165 * width
-    EDGE_TD_MARGIN = 3/54 * height
-
-    HOLE_VERT_GAP = 2.5/54 * height
-    HOLE_HORIZ_GAP = 2.5/165 * width
-
-    EDGE_PER5_GAP = 3/165 * width
-
-    holes_matrix = []   # This is the matrix returned
-
-    # TOP RAIL (2 rows, 50 holes each)
-    for i in range(2):
-        row_coords = []
-        jump = 0
-
-        for j in range(50):
-            if j % 5 == 0 and j != 0:
-                jump += 1
-
-            basex = int(EDGE_LR_MARGIN + j * HOLE_HORIZ_GAP + jump * 0.94 * EDGE_PER5_GAP)
-            basey = int(EDGE_TD_MARGIN + i * HOLE_VERT_GAP)
-
-            row_coords.append((basex, basey))
-        holes_matrix.append(row_coords)
-
-    # MIDDLE SECTION (5 rows, 63 holes each)
-    for i in range(5):
-        row_coords = []
-        for j in range(63):
-            basex = int(MID_LR_MARGIN + (1.014 * j) * HOLE_HORIZ_GAP)
-            basey = int(MID_TD_MARGIN + i * HOLE_HORIZ_GAP)
-
-            row_coords.append((basex, basey))
-        holes_matrix.append(row_coords)
-    for i in range(5):
-        row_coords = []
-        for j in range(63):
-            basex = int(MID_LR_MARGIN + (1.014 * j) * HOLE_HORIZ_GAP)
-            basey = int(MID_TD_MARGIN + i * HOLE_HORIZ_GAP)
-
-            row_coords.append((basex, height-basey))
-        holes_matrix.append(row_coords)
-
-    # BOTTOM RAIL (mirror of top rail)
-    for i in range(2):
-        row_coords = []
-        jump = 0
-
-        for j in range(50):
-            if j % 5 == 0 and j != 0:
-                jump += 1
-
-            basex = int(EDGE_LR_MARGIN + j * HOLE_HORIZ_GAP + jump * 0.94 * EDGE_PER5_GAP)
-            basey = int(height - (EDGE_TD_MARGIN + i * HOLE_VERT_GAP))
-
-            row_coords.append((basex, basey))
-        holes_matrix.append(row_coords)
-
-    return holes_matrix
+    Maps dynamic hole coordinates to standard breadboard labels.
+    """
+    ids = []
+    for (hx, hy) in hole_coords:
+        col = round((hx - paddingX) / pitch)
+        row = round((hy - paddingY) / pitch)
+        
+        # Canonical labels for both boards
+        if row == 1: label = 'Power+'
+        elif row == 2: label = 'PowerTop-'
+        elif 4 <= row <= 8: label = f'TopTerminal_{col}'
+        elif 11 <= row <= 15: label = f'BotTerminal_{col}'
+        elif row == 17: label = 'PowerBot+'
+        elif row == 18: label = 'Ground-'
+        elif row == 21: label = 'B2_Power+'
+        elif row == 22: label = 'B2_PowerTop-'
+        elif 24 <= row <= 28: label = f'B2_TopTerminal_{col}'
+        elif 31 <= row <= 35: label = f'B2_BotTerminal_{col}'
+        elif row == 37: label = 'B2_PowerBot+'
+        elif row == 38: label = 'B2_Ground-'
+        else: label = f'Unknown_{col}_{row}'
+              
+        ids.append(label)
+    return ids
 
 def detect_components(image: np.ndarray, model: YOLO) -> List[RawComponent]:
     """
     Runs YOLO object detection to find components on the breadboard.
-    
-    Args:
-        image (np.ndarray): The warped breadboard image.
-        model (YOLO): The loaded YOLOv8 model instance.
-        
-    Returns:
-        List[RawComponent]: A list of detected components.
-                            Format: (class_id, class_name, [box_corners])
     """
     results = model.predict(source=image, save=False, conf=0.20, iou=0.25)
     components = []
@@ -197,27 +154,16 @@ def detect_components(image: np.ndarray, model: YOLO) -> List[RawComponent]:
             cls_id = int(box.cls[0].item())
             class_name = names[cls_id]
             coords = box.xyxyxyxy[0].tolist() # tensors to list
-            components.append((cls_id,class_name,coords))
+            print(f"DEBUG: YOLO Detected '{class_name}' ({cls_id}) with box: {coords[:2]}...")
+            components.append((cls_id, class_name, coords))
     return components
 
 def get_equally_spaced_points(p1: Point, pn: Point, n: int) -> List[Point]:
-    """
-    Interpolates N equally spaced points between two coordinates.
-    Used for determining pin locations on multi-pin components like ICs.
-
-    Args:
-        p1 (Point): Starting point (x, y).
-        pn (Point): Ending point (x, y).
-        n (int): Number of points to generate (including start and end).
-
-    Returns:
-        List[Point]: List of (x, y) tuples representing the interpolated points.
-    """
     x1, y1 = p1
     xn, yn = pn
     points = []
     for i in range(n):
-        t = i / (n - 1)  # goes from 0 to 1
+        t = i / (n - 1)
         x = x1 + t * (xn - x1)
         y = y1 + t * (yn - y1)
         points.append((x, y))
@@ -226,13 +172,6 @@ def get_equally_spaced_points(p1: Point, pn: Point, n: int) -> List[Point]:
 def extract_component_terminals(components: List[RawComponent]) -> List[ComponentTerminals]:
     """
     Determines the exact termination points (pins) for each component based on orientation and type.
-    
-    Args:
-        components (List[RawComponent]): Raw component detections from detect_components.
-        
-    Returns:
-        List[ComponentTerminals]: Components with pin coordinates instead of bounding boxes.
-                                  Format: (class_id, class_name, [(x, y), (x, y), ...])
     """
     component_endpoints_list = []
 
@@ -242,41 +181,28 @@ def extract_component_terminals(components: List[RawComponent]) -> List[Componen
 
         if cls_id == 0: continue # Skip wire class if detected by component model
 
-        # Logic to find shortest/longest edges to determine orientation
         for i in range(len(coords)):
-            p1 = coords[i]
-            p2 = coords[(i+1)%len(coords)]
+            p1, p2 = coords[i], coords[(i+1)%len(coords)]
             d = math.sqrt(((p1[0]-p2[0])**2) + ((p1[1]-p2[1])**2))
             pq.append((d, (p1, p2)))
 
-        # Specific logic based on component type ID (resistors vs transistors etc)
-        # 4: MOSFET, 5: CIRT, 7: IC
         endedge1, endedge2 = None, None
 
-        if cls_id in [4, 5, 7]:
-            # Complex component logic (transistor/IC)
+        if cls_id in [4, 5, 7]: # MOSFET, Transistor, IC
             if cls_id in [4, 5]:
                 if pq[0][0] < pq[1][0]:
-                    _, endedge1 = pq[0]
-                    _, endedge2 = pq[2]
+                    _, endedge1 = pq[0]; _, endedge2 = pq[2]
                 else: 
-                    _, endedge1 = pq[1]
-                    _, endedge2 = pq[3]
+                    _, endedge1 = pq[1]; _, endedge2 = pq[3]
 
-                # Midpoints
                 endpoint1 = ((endedge1[0][0]+endedge1[1][0])//2, (endedge1[0][1]+endedge1[1][1])//2)
                 endpoint2 = ((endedge2[0][0]+endedge2[1][0])//2, (endedge2[0][1]+endedge2[1][1])//2)
                 endedge1 = get_equally_spaced_points(endpoint1, endpoint2, 3)
-            else:
-                # IC Logic
+            else: # IC Logic
                 if pq[0][0] > pq[1][0]:
-                     d1, endedge1 = pq[0]
-                     _, endedge2 = pq[2]
-                     d2, _ = pq[1]
+                     d1, endedge1 = pq[0]; _, endedge2 = pq[2]; d2, _ = pq[1]
                 else:
-                     d1, endedge1 = pq[1]
-                     _, endedge2 = pq[3]
-                     d2, _ = pq[0]
+                     d1, endedge1 = pq[1]; _, endedge2 = pq[3]; d2, _ = pq[0]
 
                 if (d1/d2) < 2:
                     endedge1 = get_equally_spaced_points(endedge1[0], endedge1[1], 4)
@@ -286,114 +212,74 @@ def extract_component_terminals(components: List[RawComponent]) -> List[Componen
                     endedge2 = get_equally_spaced_points(endedge2[0], endedge2[1], 8)
                 endedge1.extend(endedge2)
 
-            component_endpoints_list.append((cls_id, class_name, endedge1))
+            component_endpoints_list.append((cls_id, class_name, endedge1, coords))
 
-        else:
-            # Simple 2-terminal component logic
+        else: # Simple 2-terminal component
             if pq[0][0] < pq[1][0]:
-                _, endedge1 = pq[0]
-                _, endedge2 = pq[2]
+                _, endedge1 = pq[0]; _, endedge2 = pq[2]
             else:
-                _, endedge1 = pq[1]
-                _, endedge2 = pq[3]
+                _, endedge1 = pq[1]; _, endedge2 = pq[3]
 
             endpoint1 = ((endedge1[0][0]+endedge1[1][0])/2, (endedge1[0][1]+endedge1[1][1])/2)
             endpoint2 = ((endedge2[0][0]+endedge2[1][0])/2, (endedge2[0][1]+endedge2[1][1])/2)
-            component_endpoints_list.append((cls_id, class_name, [endpoint1, endpoint2]))
+            component_endpoints_list.append((cls_id, class_name, [endpoint1, endpoint2], coords))
 
     return component_endpoints_list
 
-def detect_wires(image: np.ndarray, model: YOLO, holes: HoleGrid) -> List[WireData]:
+def map_terminals_to_holes(components: List[ComponentTerminals], holes: List[HoleCoord], pitch: float, paddingX: float, paddingY: float) -> List[MappedComponent]:
     """
-    Detects jumper wires using Keypoint detection and maps endpoints to breadboard hole IDs.
-
-    Args:
-        image (np.ndarray): The warped breadboard image.
-        model (YOLO): The wire endpoint detection model.
-        holes (HoleGrid): The grid of hole coordinates (from pixel_map).
-
-    Returns:
-        List[WireData]: A list of wires with their connected holes.
-                        Format: [0, "Wire N", ["A1", "J63"]]
+    Maps floating-point terminal coordinates to the nearest snapped breadboard holes.
     """
-    y_to_letter = {0:'U-',1:'U+',2:'A',3:'B',4:'C',5:'D',6:'E',7:'J',8:'I',9:'H',10:'G',11:'F',12:'L+',13:'L-'}
-    results = model(image)[0]
-    endpoints = []
+    hole_labels = map_to_breadboard_ids(holes, pitch, paddingX, paddingY)
+    hole_to_label = {holes[i]: hole_labels[i] for i in range(len(holes))}
 
-    for kpts in results.keypoints.xy:
-        if kpts.shape[0] < 2: continue
-        x1, y1 = kpts[0]
-        x2, y2 = kpts[1]
-        endpoints.append(((x1, y1), (x2, y2)))
-
-    wire_data = []
-
-    for idx, end_pair in enumerate(endpoints):
-        brdbord_coords = []
-        for coords in end_pair:
-            # Find closest hole
-            closest_y = 0
-            closest_x = 0
-            smallest_gap = float('inf')
-
-            # Find row
-            for i in range(14):
-                if abs(holes[i][0][1] - coords[1]) < smallest_gap:
-                    smallest_gap = abs(holes[i][0][1] - coords[1])
-                    closest_y = i
-
-            # Find col
-            smallest_gap = float('inf')
-            for j in range(len(holes[closest_y])):
-                if abs(holes[closest_y][j][0] - coords[0]) < smallest_gap:
-                    smallest_gap = abs(holes[closest_y][j][0] - coords[0])
-                    closest_x = j
-
-            brdbord_coords.append(y_to_letter[closest_y] + str(closest_x))
-
-        wire_data.append([0, f"Wire {idx+1}", brdbord_coords])
-
-    return wire_data
-
-def map_terminals_to_holes(components: List[ComponentTerminals], holes: HoleGrid) -> List[Tuple[int, str, List[str]]]:
-    """
-    Maps component terminal coordinates to the nearest breadboard holes.
-
-    Args:
-        components (List[ComponentTerminals]): List of components with (x,y) pin coordinates.
-        holes (HoleGrid): The grid of hole coordinates.
- 
-    Returns:
-        List[Tuple[int, str, List[str]]]: List of components mapped to physical holes.
-                                          Format: (class_id, class_name, ["A1", "B2", ...])
-    """
-    y_to_letter = {0:'U-',1:'U+',2:'A',3:'B',4:'C',5:'D',6:'E',7:'J',8:'I',9:'H',10:'G',11:'F',12:'L+',13:'L-'}
     mapped_components = []
-
     for comp in components:
-        cls_id, name, terminals = comp
+        cls_id, name, terminals, coords = comp
         mapped_terminals = []
+        terminal_coords = []
 
-        for coords in terminals:
-            closest_y = 0
-            closest_x = 0
-            smallest_gap = float('inf')
+        for t_pt in terminals:
+            closest_h = min(holes, key=lambda h: (h[0]-t_pt[0])**2 + (h[1]-t_pt[1])**2)
+            mapped_terminals.append(hole_to_label.get(closest_h, "UNK"))
+            terminal_coords.append(closest_h)
 
-            # Find row
-            for i in range(14):
-                if abs(holes[i][0][1] - coords[1]) < smallest_gap:
-                    smallest_gap = abs(holes[i][0][1] - coords[1])
-                    closest_y = i
-
-            # Find col
-            smallest_gap = float('inf')
-            for j in range(len(holes[closest_y])):
-                if abs(holes[closest_y][j][0] - coords[0]) < smallest_gap:
-                    smallest_gap = abs(holes[closest_y][j][0] - coords[0])
-                    closest_x = j
-
-            mapped_terminals.append(y_to_letter[closest_y] + str(closest_x))
-
-        mapped_components.append((cls_id, name, mapped_terminals))
+        mapped_components.append((cls_id, name, mapped_terminals, terminal_coords, coords))
 
     return mapped_components
+
+def detect_wires_yolo(image: np.ndarray, model: YOLO, holes: List[HoleCoord], pitch: float, paddingX: float, paddingY: float) -> List[Dict]:
+    """
+    Detects jumper wires using Keypoint detection and maps endpoints to breadboard hole labels.
+    """
+    results = model(image)[0]
+    all_wire_data = []
+    
+    # Pre-map holes for lookups
+    hole_labels = map_to_breadboard_ids(holes, pitch, paddingX, paddingY)
+    hole_to_label = {holes[i]: hole_labels[i] for i in range(len(holes))}
+    
+    for idx, kpts in enumerate(results.keypoints.xy):
+        if kpts.shape[0] < 2: continue
+        x1, y1 = float(kpts[0][0]), float(kpts[0][1])
+        x2, y2 = float(kpts[1][0]), float(kpts[1][1])
+        
+        # Find closest holes
+        def nearest_hole(pt):
+            return min(holes, key=lambda h: (h[0]-pt[0])**2 + (h[1]-pt[1])**2)
+            
+        H1 = nearest_hole((x1, y1))
+        H2 = nearest_hole((x2, y2))
+        
+        if H1 != H2:
+             # Standard orthogonal path: H1 -> (H2_x, H1_y) -> H2
+             mid_point = (H2[0], H1[1])
+             path = [H1, mid_point, H2]
+
+             all_wire_data.append({
+                 "color": "unknown",
+                 "endpoints": [hole_to_label.get(H1, "UNK"), hole_to_label.get(H2, "UNK")],
+                 "path": path
+             })
+
+    return all_wire_data
