@@ -1,5 +1,4 @@
 from ultralytics import YOLO
-import os
 from typing import Optional
 
 class MLManager:

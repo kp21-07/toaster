@@ -6,6 +6,9 @@ from collections import deque
 import math
 import os
 
+# Debug Mode: Set TOASTER_DEBUG=1 in environment to enable debug image writing
+DEBUG_MODE = os.getenv("TOASTER_DEBUG", "0") == "1"
+
 # --- Type Definitions ---
 Point = Tuple[float, float]
 HoleCoord = Tuple[int, int]
@@ -131,9 +134,10 @@ def detect_holes(warped_image: np.ndarray) -> Tuple[List[HoleCoord], float, floa
     final_holes = []
     for ry in row_targets:
         for cx in range(63):
-            rx = paddingX + cx * pitch
             final_holes.append((int(rx), int(ry)))
             
+    if DEBUG_MODE:
+        print(f"Calculated {len(final_holes)} holes on grid.")
     return final_holes, pitch, paddingX, paddingY
 
 def map_to_breadboard_ids(hole_coords: List[HoleCoord], pitch: float, paddingX: float, paddingY: float) -> List[str]:
@@ -177,7 +181,8 @@ def detect_components(image: np.ndarray, model: YOLO) -> List[RawComponent]:
             cls_id = int(box.cls[0].item())
             class_name = names[cls_id]
             coords = box.xyxyxyxy[0].tolist() # tensors to list
-            print(f"DEBUG: YOLO Detected '{class_name}' ({cls_id}) with box: {coords[:2]}...")
+            if DEBUG_MODE:
+                print(f"YOLO Detected '{class_name}' ({cls_id}) at {coords[0]}")
             components.append((cls_id, class_name, coords))
     return components
 
@@ -267,6 +272,8 @@ def map_terminals_to_holes(components: List[ComponentTerminals], holes: List[Hol
             mapped_terminals.append(hole_to_label.get(closest_h, "UNK"))
             terminal_coords.append(closest_h)
 
+        if DEBUG_MODE:
+            print(f"Mapped {name} terminals to: {mapped_terminals}")
         mapped_components.append((cls_id, name, mapped_terminals, terminal_coords, coords))
 
     return mapped_components
@@ -315,7 +322,7 @@ def detect_wires_yolo(image: np.ndarray, model: YOLO, holes: List[HoleCoord], pi
 
     return all_wire_data
 
-def extract_color_masks_engine(image: np.ndarray, components: List = []) -> dict:
+def extract_color_masks_engine(image: np.ndarray, components: List = [], debug: bool = False) -> dict:
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     height, width, _ = image.shape
     
@@ -351,8 +358,9 @@ def extract_color_masks_engine(image: np.ndarray, components: List = []) -> dict
     }
     
     color_masks = {}
-    debug_mask_dir = "debug_outputs/masks"
-    os.makedirs(debug_mask_dir, exist_ok=True)
+    if debug:
+        debug_mask_dir = "debug_outputs/masks"
+        os.makedirs(debug_mask_dir, exist_ok=True)
     
     for color_name, bounds in color_ranges.items():
         mask = np.zeros((height, width), dtype=np.uint8)
@@ -375,7 +383,8 @@ def extract_color_masks_engine(image: np.ndarray, components: List = []) -> dict
         mask[:, -25:] = 0
         
         color_masks[color_name] = mask
-        cv2.imwrite(f"{debug_mask_dir}/{color_name}_mask.jpg", mask)
+        if debug:
+            cv2.imwrite(f"{debug_mask_dir}/{color_name}_mask.jpg", mask)
         
     # --- Component Masking Logic ---
     # Zero out the regions occupied by detected components (resistors, LEDs, etc.)
@@ -410,11 +419,11 @@ def extract_color_masks_engine(image: np.ndarray, components: List = []) -> dict
         
     return color_masks
 
-def detect_wires_classic(image: np.ndarray, holes: List[HoleCoord], pitch: float, paddingX: float, paddingY: float, components: List = []) -> List[Dict]:
+def detect_wires_classic(image: np.ndarray, holes: List[HoleCoord], pitch: float, paddingX: float, paddingY: float, components: List = [], debug: bool = False) -> List[Dict]:
     hole_labels = map_to_breadboard_ids(holes, pitch, paddingX, paddingY)
     hole_to_label = {holes[i]: hole_labels[i] for i in range(len(holes))}
     
-    color_masks = extract_color_masks_engine(image, components)
+    color_masks = extract_color_masks_engine(image, components, debug=debug)
     
     all_wire_data = []
     
@@ -497,6 +506,8 @@ def detect_wires_classic(image: np.ndarray, holes: List[HoleCoord], pitch: float
                                 connections.pop(j)
                                 connections.pop(i)
                                 connections.append((A, D))
+                                if DEBUG_MODE:
+                                    print(f"Smart Merge: Combined split segments of color {color_name}")
                                 smart_merged = True
                                 break
                     if smart_merged: break
