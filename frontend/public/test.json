@@ -4,310 +4,52 @@
       "id": 1,
       "type": "voltage_source",
       "name": "V1",
-      "terminals": [
-        "Power+",
-        "Ground-"
-      ],
+      "terminals": ["V_POS", "V_NEG"],
       "value": "5V",
-      "box": [
-        [
-          78,
-          61
-        ],
-        [
-          150,
-          61
-        ],
-        [
-          150,
-          91
-        ],
-        [
-          78,
-          91
-        ]
-      ]
+      "box": [[40, 40], [120, 40], [120, 120], [40, 120]]
     },
     {
       "id": 2,
       "type": "resistor",
       "name": "R1",
-      "terminals": [
-        "Power+",
-        "NodeA"
-      ],
+      "terminals": ["Hole_IN", "Hole_BASE"],
       "value": "10k",
-      "box": [
-        [
-          246,
-          120
-        ],
-        [
-          346,
-          120
-        ],
-        [
-          346,
-          144
-        ],
-        [
-          246,
-          144
-        ]
-      ]
+      "box": [[200, 100], [300, 100], [300, 140], [200, 140]]
     },
     {
       "id": 3,
       "type": "resistor",
       "name": "R2",
-      "terminals": [
-        "NodeA",
-        "Ground-"
-      ],
-      "value": "10k",
-      "box": [
-        [
-          442,
-          120
-        ],
-        [
-          542,
-          120
-        ],
-        [
-          542,
-          144
-        ],
-        [
-          442,
-          144
-        ]
-      ]
+      "terminals": ["Hole_PWR", "Hole_OUT"],
+      "value": "1k",
+      "box": [[200, 180], [300, 180], [300, 220], [200, 220]]
     },
     {
       "id": 4,
-      "type": "capacitor",
-      "name": "C1",
-      "terminals": [
-        "NodeA",
-        "Ground-"
-      ],
-      "value": "1uF",
-      "box": [
-        [
-          638,
-          154
-        ],
-        [
-          682,
-          154
-        ],
-        [
-          682,
-          194
-        ],
-        [
-          638,
-          194
-        ]
-      ]
-    },
-    {
-      "id": 5,
       "type": "transistor",
       "name": "Q1",
-      "terminals": [
-        "NodeA",
-        "NodeOut",
-        "Ground-"
-      ],
+      "terminals": ["Hole_OUT", "Hole_BASE", "Hole_GND"],
       "value": "2N3904",
-      "box": [
-        [
-          778,
-          194
-        ],
-        [
-          822,
-          194
-        ],
-        [
-          822,
-          238
-        ],
-        [
-          778,
-          238
-        ]
-      ]
+      "box": [[350, 120], [400, 120], [400, 200], [350, 200]]
     }
   ],
   "wires": [
     {
       "id": 1,
-      "color": "#ef4444",
-      "endpoints": [
-        "Power Rail",
-        "Power+"
-      ],
-      "points": [
-        [
-          58,
-          34
-        ],
-        [
-          58,
-          76
-        ]
-      ]
+      "color": "red",
+      "endpoints": ["V_POS", "Hole_PWR"],
+      "points": [[100, 80], [100, 200], [200, 200]]
     },
     {
       "id": 2,
-      "color": "#1e293b",
-      "endpoints": [
-        "Ground Rail",
-        "Ground-"
-      ],
-      "points": [
-        [
-          170,
-          76
-        ],
-        [
-          170,
-          272
-        ]
-      ]
-    },
-    {
-      "id": 3,
-      "color": "#ef4444",
-      "endpoints": [
-        "Power Rail",
-        "Power+"
-      ],
-      "points": [
-        [
-          226,
-          34
-        ],
-        [
-          226,
-          132
-        ]
-      ]
-    },
-    {
-      "id": 4,
-      "color": "#3b82f6",
-      "endpoints": [
-        "NodeA",
-        "NodeA"
-      ],
-      "points": [
-        [
-          366,
-          132
-        ],
-        [
-          366,
-          90
-        ],
-        [
-          422,
-          90
-        ],
-        [
-          422,
-          132
-        ]
-      ]
-    },
-    {
-      "id": 5,
-      "color": "#1e293b",
-      "endpoints": [
-        "Ground-",
-        "Ground Rail"
-      ],
-      "points": [
-        [
-          562,
-          132
-        ],
-        [
-          562,
-          272
-        ]
-      ]
-    },
-    {
-      "id": 6,
-      "color": "#3b82f6",
-      "endpoints": [
-        "NodeA",
-        "NodeA"
-      ],
-      "points": [
-        [
-          422,
-          118
-        ],
-        [
-          422,
-          202
-        ],
-        [
-          618,
-          202
-        ],
-        [
-          618,
-          174
-        ]
-      ]
-    },
-    {
-      "id": 7,
-      "color": "#1e293b",
-      "endpoints": [
-        "Ground-",
-        "Ground Rail"
-      ],
-      "points": [
-        [
-          702,
-          174
-        ],
-        [
-          702,
-          272
-        ]
-      ]
-    },
-    {
-      "id": 8,
-      "color": "#3b82f6",
-      "endpoints": [
-        "NodeA",
-        "NodeA"
-      ],
-      "points": [
-        [
-          618,
-          188
-        ],
-        [
-          758,
-          188
-        ],
-        [
-          758,
-          216
-        ]
-      ]
+      "color": "black",
+      "endpoints": ["Hole_GND", "V_NEG"],
+      "points": [[380, 180], [380, 300], [80, 300], [80, 100]]
     }
   ],
-  "netlist": "* Test Netlist loaded from test.json\nV1 Power+ Ground- 5V\nR1 Power+ NodeA 10k\nR2 NodeA Ground- 10k\nC1 NodeA Ground- 1uF\nQ1 NodeA NodeOut Ground- 2N3904\n.end",
-  "warped_image": null
+  "grounds": ["V_NEG"],
+  "netlist": "V1 PWR 0 5V\nR1 IN BASE 10k\nR2 PWR OUT 1k\nQ1 OUT BASE 0 2N3904\n.end",
+  "reference_spice": "V1 PWR 0 5V\nR1 IN BASE 10k\nR2 PWR OUT 1k\nQ1 OUT BASE 0 2N3904\n"
 }
+
+

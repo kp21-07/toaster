@@ -7,7 +7,9 @@ import base64
 import os
 import json
 
-from app.models import AnalysisResponse, CircuitComponent, Wire, NetlistRequest
+from app.models import AnalysisResponse, CircuitComponent, Wire, NetlistRequest, VerificationRequest, VerificationResponse
+from app.spice_parser import SpiceParser
+from app.graph_utils import CircuitGraphBuilder, compare_circuits
 from app.ml_manager import ml_engine
 from app.cv_engine import (
     detect_and_warp,
@@ -21,7 +23,7 @@ from app.cv_engine import (
     pre_warp_image,
     detect_wires_classic
 )
-from app.circuit_solver import generate_spice_netlist
+from app.circuit_solver import generate_spice_netlist, build_node_map
 
 app = FastAPI(title="Toaster Backend")
 
@@ -112,6 +114,37 @@ async def solve_circuit(req: NetlistRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Netlist generation failed: {str(e)}")
+
+@app.post("/verify-circuit", response_model=VerificationResponse)
+async def verify_circuit(req: VerificationRequest):
+    """
+    Verifies the detected circuit against a reference SPICE netlist.
+    """
+    try:
+        # 1. Parse Reference SPICE
+        ref_components = SpiceParser.parse_netlist(req.reference_spice)
+        G_ref = CircuitGraphBuilder.build_from_spice(ref_components)
+        
+        # 2. Prepare Detected Data for Graph Builder
+        # Need to merge nets based on wires
+        solver_wires = []
+        for w in req.wires:
+            solver_wires.append([w.id, f"Wire_{w.id}", w.endpoints])
+            
+        node_map, _ = build_node_map(solver_wires, req.grounds)
+        
+        # 3. Build Detected Graph
+        G_det = CircuitGraphBuilder.build_from_detected(req.components, node_map)
+        
+        # 4. Compare
+        is_matched, report = compare_circuits(G_ref, G_det)
+        
+        return VerificationResponse(is_matched=is_matched, report=report)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}")
 
 @app.post("/pre-warp")
 async def get_pre_warped_image(

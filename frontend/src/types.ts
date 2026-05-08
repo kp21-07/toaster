@@ -44,3 +44,8 @@ export interface AnalysisResponse {
     annotated_image?: string | null;
     warped_image?: string | null;
 }
+
+export interface VerificationResponse {
+    is_matched: boolean;
+    report: any;
+}

@@ -66,6 +66,22 @@ class NetlistRequest(BaseModel):
     wires: List[Wire]
     grounds: List[str] = []
 
+class VerificationRequest(BaseModel):
+    """
+    Request model for circuit verification.
+    """
+    components: List[CircuitComponent]
+    wires: List[Wire]
+    grounds: List[str] = []
+    reference_spice: str
+
+class VerificationResponse(BaseModel):
+    """
+    Response model for circuit verification.
+    """
+    is_matched: bool
+    report: Dict
+
 # Additional Metadata if we want to send any. For now leaving this out
 # class AnalysisRequest(BaseModel):
 #     timestamp: float

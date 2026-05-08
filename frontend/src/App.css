@@ -20,30 +20,6 @@
   --scrollbar-track: #f3f4f6;
 
   --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.05);
-
-  /* --- DARK MODE (Commented for easy switching) --- */
-  /*
-  --primary: #3b82f6;        
-  --primary-light: #1e3a8a;  
-  --primary-text: #93c5fd;   
-  
-  --bg-color: #121212;       
-  --card-bg: #1e1e1e;        
-  --header-bg: #2d2d2d;      
-  --hover-bg: #2a2a2a;       
-  
-  --text-main: #e5e5e5;      
-  --text-muted: #a3a3a3;     
-  --text-inverse: #ffffff;   
-  
-  --border-color: #333333;   
-  --border-hover: #666666;   
-  
-  --scrollbar-thumb: #4b5563;
-  --scrollbar-track: #1f2937;
-  
-  --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.3);
-  */
 }
 
 body {
@@ -219,4 +195,60 @@ pre::-webkit-scrollbar-track {
 .icon-btn-close:hover {
   background: #f1f5f9;
   color: #475569;
+}
+
+/* Modals & Popovers */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.edit-popover {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  width: 320px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.edit-field {
+  margin-bottom: 1rem;
+}
+
+.edit-field label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.edit-field input, .edit-field select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.btn-save {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-cancel {
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
 }

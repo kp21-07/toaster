@@ -5,11 +5,12 @@ import { UploadArea } from './components/UploadArea';
 import { NetlistViewer } from './components/NetlistViewer';
 import { ComponentList } from './components/ComponentList';
 import { VirtualBreadboard } from './components/VirtualBreadboard';
-import { analyzeImage, solveCircuit } from './api/client';
-import type { AnalysisResponse, CircuitComponent } from './types';
+import { analyzeImage, solveCircuit, verifyCircuit } from './api/client';
+import type { AnalysisResponse, CircuitComponent, VerificationResponse } from './types';
 import { RefreshCw, Plus, Undo, Redo, Download, Upload, Target, Image } from 'lucide-react';
 import { autoRouteCircuit } from './utils/breadboardRouter';
 import { CalibrationOverlay } from './components/CalibrationOverlay';
+import { VerificationPanel } from './components/VerificationPanel';
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
@@ -22,6 +23,8 @@ function App() {
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [showPhotoOverlay, setShowPhotoOverlay] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', type: 'resistor', value: '1k' });
+  const [verificationResult, setVerificationResult] = useState<VerificationResponse | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const updateDataWithHistory = (newData: AnalysisResponse | ((prev: AnalysisResponse | null) => AnalysisResponse | null)) => {
     setData((prev) => {
@@ -84,8 +87,6 @@ function App() {
     setData(null);
     setHistory([]);
     setFuture([]);
-    
-    // We only use cached cropBox. Markers always need to be verified because the camera moves.
     setIsCalibrating(true);
   };
 
@@ -97,7 +98,6 @@ function App() {
         localStorage.setItem('breadboardCropBox', JSON.stringify(cropBox));
     }
     
-    // If we didn't get a new cropBox from the UI, we must have one in localStorage
     const savedCropBoxStr = localStorage.getItem('breadboardCropBox');
     const finalCropBox = cropBox || (savedCropBoxStr ? JSON.parse(savedCropBoxStr) : undefined);
     
@@ -109,6 +109,7 @@ function App() {
     setData(null);
     setHistory([]);
     setFuture([]);
+    setVerificationResult(null);
   };
 
   const handleComponentsUpdate = (updatedComponents: CircuitComponent[]) => {
@@ -119,16 +120,32 @@ function App() {
     if (data) {
       try {
         const electricallyRoutedComponents = autoRouteCircuit(data.components, data.wires || []);
-        
-        // Use Backend as Source of Truth
         const response = await solveCircuit(electricallyRoutedComponents, data.wires || []);
-        
         updateDataWithHistory({ ...data, components: electricallyRoutedComponents, netlist: response.netlist });
-        toast.success("Electrical paths routed & Netlist updated from Backend.");
+        toast.success("Electrical paths routed & Netlist updated.");
       } catch (err: any) {
         console.error(err);
-        toast.error("Failed to solve circuit. Check connections.");
+        toast.error("Failed to solve circuit.");
       }
+    }
+  };
+
+  const handleVerify = async (spice: string) => {
+    if (!data) return;
+    setIsVerifying(true);
+    try {
+      const res = await verifyCircuit(data.components, data.wires || [], (data as any).grounds || [], spice);
+      setVerificationResult(res);
+      if (res.is_matched) {
+        toast.success("Circuit verified successfully!");
+      } else {
+        toast.error("Circuit verification failed. Wrong topology.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Verification failed. Please check your SPICE syntax.");
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -150,9 +167,10 @@ function App() {
     setData(null);
     setHistory([]);
     setFuture([]);
+    setVerificationResult(null); 
     try {
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`Could not load ${url} (has the backend written it yet?)`);
+      if (!res.ok) throw new Error(`Could not load ${url}`);
       const jsonResult = await res.json();
       setData(jsonResult);
       toast.success(`Loaded ${url} successfully!`);
@@ -188,9 +206,8 @@ function App() {
            setHistory([]);
            setFuture([]);
            setFile(new File([], "imported.json"));
+           setVerificationResult(null);
            toast.success("Project imported successfully.");
-        } else {
-           toast.error("Invalid project file.");
         }
       } catch (err) {
         toast.error("Failed to parse JSON file.");
@@ -202,48 +219,30 @@ function App() {
 
   const handleAddComponent = (type: string, value: string, customName: string) => {
      if (!data) return;
-     
      const newCompId = Math.max(0, ...(data.components || []).map(c => c.id)) + 1;
-     const componentX = 200;
-     const componentY = 150;
-     
      let name = customName.trim();
      let numTerminals = 2;
-     
      if (type === 'transistor') numTerminals = 3;
-
      if (!name) {
-       if (type === 'resistor') { name = `R${newCompId}_new`; }
-       else if (type === 'capacitor') { name = `C${newCompId}_new`; }
-       else if (type === 'voltage_source') { name = `V${newCompId}_new`; }
-       else if (type === 'transistor') { name = `Q${newCompId}_new`; }
-       else { name = `U${newCompId}_new`; }
+       name = `${type.charAt(0).toUpperCase()}${newCompId}_new`;
      }
-
      const newComp: CircuitComponent = {
          id: newCompId,
          name,
          type,
          value,
-         box: [
-           [componentX, componentY],
-           [componentX + 60, componentY],
-           [componentX + 60, componentY + 20],
-           [componentX, componentY + 20]
-         ],
+         box: [[200, 150], [260, 150], [260, 170], [200, 170]],
          terminals: Array(numTerminals).fill('?'),
          rotation: 0
      };
-     
-     updateDataWithHistory(prev => prev ? {
-       ...prev,
-       components: [...(prev.components || []), newComp]
-     } : prev);
+     updateDataWithHistory(prev => prev ? { ...prev, components: [...(prev.components || []), newComp] } : prev);
   };
+
+  // Reusable button style
+  const btnStyle = { padding: '0.6rem 1.2rem', borderRadius: '6px', border: '1px solid #d1d5db', background: '#f9fafb', cursor: 'pointer', fontWeight: 500, color: '#374151' };
 
   return (
     <div className="app-container">
-      {/* Global Modals */}
       {isCalibrating && file && (
         <CalibrationOverlay 
           imageFile={file} 
@@ -251,6 +250,7 @@ function App() {
           onCancel={() => setIsCalibrating(false)}
         />
       )}
+      
       {showAddPopover && (
         <div className="modal-backdrop" onClick={() => setShowAddPopover(false)}>
           <div className="edit-popover" onClick={e => e.stopPropagation()}>
@@ -260,29 +260,15 @@ function App() {
             <div className="edit-body">
               <div className="edit-field">
                 <label>Name (Optional)</label>
-                <input 
-                  type="text" 
-                  value={addForm.name} 
-                  onChange={e => setAddForm({...addForm, name: e.target.value})}
-                  placeholder="Auto-generated if empty"
-                />
+                <input type="text" value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})} />
               </div>
               <div className="edit-field">
                 <label>Value</label>
-                <input 
-                  type="text" 
-                  value={addForm.value} 
-                  onChange={e => setAddForm({...addForm, value: e.target.value})}
-                  placeholder="e.g. 1k"
-                />
+                <input type="text" value={addForm.value} onChange={e => setAddForm({...addForm, value: e.target.value})} />
               </div>
               <div className="edit-field">
                 <label>Type</label>
-                <select 
-                  value={addForm.type} 
-                  onChange={e => setAddForm({...addForm, type: e.target.value})}
-                  style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.85rem', background: 'white' }}
-                >
+                <select value={addForm.type} onChange={e => setAddForm({...addForm, type: e.target.value})} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.85rem', background: 'white' }}>
                   <option value="resistor">Resistor</option>
                   <option value="capacitor">Capacitor</option>
                   <option value="transistor">Transistor</option>
@@ -290,11 +276,7 @@ function App() {
                 </select>
               </div>
               <div className="edit-actions" style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-                <button className="btn-save" onClick={() => {
-                    handleAddComponent(addForm.type, addForm.value, addForm.name);
-                    setShowAddPopover(false);
-                    setAddForm({ name: '', type: 'resistor', value: '1k' }); // reset
-                }} style={{ flex: 1 }}>Apply</button>
+                <button className="btn-save" onClick={() => { handleAddComponent(addForm.type, addForm.value, addForm.name); setShowAddPopover(false); }} style={{ flex: 1 }}>Apply</button>
                 <button className="btn-cancel" onClick={() => setShowAddPopover(false)} style={{ flex: 1 }}>Cancel</button>
               </div>
             </div>
@@ -309,16 +291,16 @@ function App() {
         </div>
         {data && (
            <div style={{ position: 'absolute', right: '0', display: 'flex', gap: '0.5rem' }}>
-             <button onClick={handleExportJson} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Save Project locally">
+             <button onClick={handleExportJson} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: '#f8fafc', color: '#334155', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Save Project locally">
                <Download size={16} /> Save
              </button>
-             <button onClick={() => setShowPhotoOverlay(!showPhotoOverlay)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: showPhotoOverlay ? '#3b82f6' : '#f8fafc', color: showPhotoOverlay ? 'white' : '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Show original photo under the grid">
+             <button onClick={() => setShowPhotoOverlay(!showPhotoOverlay)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: showPhotoOverlay ? '#2563eb' : '#f8fafc', color: showPhotoOverlay ? 'white' : '#2563eb', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Show original photo under the grid">
                <Image size={16} /> {showPhotoOverlay ? 'Hide Photo' : 'Show Photo'}
              </button>
-             <button onClick={() => setIsCalibrating(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: '#f8fafc', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Manually calibrate board corners">
+             <button onClick={() => setIsCalibrating(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: '#f8fafc', color: '#2563eb', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Manually calibrate board corners">
                <Target size={16} /> Calibrate
              </button>
-             <label htmlFor="import-json" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Load Project">
+             <label htmlFor="import-json" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: '#f8fafc', color: '#334155', border: '1px solid #e5e7eb', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Load Project">
                <Upload size={16} /> Load
                <input id="import-json" type="file" accept=".json" onChange={handleImportJson} style={{ display: 'none' }} />
              </label>
@@ -334,79 +316,35 @@ function App() {
         margin: '0 auto',
         display: 'flex',
         flexDirection: 'column',
-        gap: '2rem',
-        transition: 'all 0.3s ease'
+        gap: '2rem'
       }}>
-
-        {/* Top Content: Input / Visualization */}
         <Toaster position="bottom-center" />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', maxWidth: data ? '100%' : '600px', margin: '0 auto' }}>
-
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', maxWidth: data ? '100%' : '600px', margin: '0 auto' }}>
           {!data ? (
-            // State A: Upload Mode
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <UploadArea onFileSelect={handleFileSelect} isLoading={isLoading} />
-              
-              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '0.5rem' }}>
-                <button 
-                  onClick={() => handleLoadJson('/test.json')}
-                  style={{ padding: '0.6rem 1.2rem', borderRadius: '6px', border: '1px solid #d1d5db', background: '#f9fafb', cursor: 'pointer', fontWeight: 500, color: '#374151' }}
-                >
-                  Load test.json
-                </button>
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                <button onClick={() => handleLoadJson('/test.json')} style={btnStyle}>Load Transistor</button>
+                <button onClick={() => handleLoadJson('/test_led.json')} style={btnStyle}>Load Simple LED</button>
+                <button onClick={() => handleLoadJson('/test_divider.json')} style={btnStyle}>Load Voltage Divider</button>
+                <button onClick={() => handleLoadJson('/test_parallel.json')} style={btnStyle}>Load Parallel Resistors</button>
+                <button onClick={() => handleLoadJson('/test_rc_filter.json')} style={btnStyle}>Load RC Filter</button>
+                <button onClick={() => handleLoadJson('/test_series_leds.json')} style={btnStyle}>Load Series LEDs</button>
               </div>
-
-              {file && !isLoading && (
-                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                  Processing: <strong>{file.name}</strong>
-                </div>
-              )}
             </div>
           ) : (
-            // State B: Result Mode (Virtual Breadboard)
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', animation: 'fadeIn 0.5s' }}>
+             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', animation: 'fadeIn 0.5s' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                   <h2 style={{ margin: 0 }}>Virtual Breadboard</h2>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                     <span style={{fontWeight: 500, color: '#3b82f6'}}>Guide:</span> Click a component to edit/delete. Right-click any wire handle to delete it.
-                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                  <button 
-                    onClick={handleUndo}
-                    disabled={history.length === 0}
-                    style={{ opacity: history.length === 0 ? 0.5 : 1, background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', padding: '0.4rem 0.6rem', borderRadius: '6px', cursor: history.length === 0 ? 'default' : 'pointer' }}
-                    title="Undo (Ctrl+Z)"
-                  >
-                    <Undo size={16} />
-                  </button>
-                  <button 
-                    onClick={handleRedo}
-                    disabled={future.length === 0}
-                    style={{ opacity: future.length === 0 ? 0.5 : 1, background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', padding: '0.4rem 0.6rem', borderRadius: '6px', cursor: future.length === 0 ? 'default' : 'pointer' }}
-                    title="Redo (Ctrl+Y)"
-                  >
-                    <Redo size={16} />
-                  </button>
-                  <button 
-                    onClick={() => setShowAddPopover(true)}
-                    style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', padding: '0.4rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <Plus size={16} /> Component
-                  </button>
-                  <button  
-                    onClick={() => setIsDrawingWire(!isDrawingWire)}
-                    style={{ background: isDrawingWire ? '#3b82f6' : '#f1f5f9', color: isDrawingWire ? 'white' : '#334155', border: '1px solid #cbd5e1', padding: '0.4rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <Plus size={16} /> {isDrawingWire ? 'Drawing...' : 'Wire'}
-                  </button>
-                  <button  
-                    onClick={confirmUpdateBoard}
-                    style={{ background: '#10b981', color: 'white', border: 'none', padding: '0.4rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem' }}
-                  >
-                    Update Board
-                  </button>
+                  <button onClick={handleUndo} disabled={history.length === 0} style={{ opacity: history.length === 0 ? 0.5 : 1, background: '#f8fafc', color: '#334155', border: '1px solid #e5e7eb', padding: '0.4rem 0.6rem', borderRadius: '6px', cursor: 'pointer' }}><Undo size={16} /></button>
+                  <button onClick={handleRedo} disabled={future.length === 0} style={{ opacity: future.length === 0 ? 0.5 : 1, background: '#f8fafc', color: '#334155', border: '1px solid #e5e7eb', padding: '0.4rem 0.6rem', borderRadius: '6px', cursor: 'pointer' }}><Redo size={16} /></button>
+                  <button onClick={() => setShowAddPopover(true)} style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #e5e7eb', padding: '0.4rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Plus size={16} /> Component</button>
+                  <button onClick={() => setIsDrawingWire(!isDrawingWire)} style={{ background: isDrawingWire ? '#2563eb' : '#f1f5f9', color: isDrawingWire ? 'white' : '#334155', border: '1px solid #e5e7eb', padding: '0.4rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '4px' }}><Plus size={16} /> {isDrawingWire ? 'Drawing...' : 'Wire'}</button>
+                  <button onClick={confirmUpdateBoard} style={{ background: '#10b981', color: 'white', border: 'none', padding: '0.4rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem' }}>Update Board</button>
                 </div>
               </div>
 
@@ -423,23 +361,26 @@ function App() {
           )}
         </div>
 
-        {/* Bottom Section: Split vertically */}
         {data && (
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '2rem', animation: 'fadeIn 0.5s', alignItems: 'start', paddingBottom: '2rem' }}>
-
             <div style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
               <h2 style={{ fontSize: '1.2rem', margin: '0 0 1rem 0' }}>Detected Components</h2>
               <ComponentList components={data.components} />
             </div>
-
             <div style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
               <h2 style={{ fontSize: '1.2rem', margin: '0 0 1rem 0' }}>SPICE Output</h2>
               <NetlistViewer netlist={data.netlist} />
             </div>
-
+            <div style={{ gridColumn: 'span 2' }}>
+              <VerificationPanel 
+                onVerify={handleVerify} 
+                result={verificationResult} 
+                isLoading={isVerifying} 
+                cheatSpice={(data as any).reference_spice}
+              />
+            </div>
           </div>
         )}
-
       </div>
     </div>
   );

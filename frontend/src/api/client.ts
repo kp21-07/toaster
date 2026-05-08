@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AnalysisResponse } from '../types';
+import type { AnalysisResponse, VerificationResponse } from '../types';
 
 // Create Axios Client
 // We point to /api so Vite proxies it to localhost:8000
@@ -53,6 +53,16 @@ export const solveCircuit = async (components: any[], wires: any[]): Promise<{ n
         components,
         wires,
         grounds: []
+    });
+    return response.data;
+};
+
+export const verifyCircuit = async (components: any[], wires: any[], grounds: string[], referenceSpice: string): Promise<VerificationResponse> => {
+    const response = await apiClient.post<VerificationResponse>('/verify-circuit', {
+        components,
+        wires,
+        grounds,
+        reference_spice: referenceSpice
     });
     return response.data;
 };
