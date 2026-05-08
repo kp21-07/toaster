@@ -23,6 +23,7 @@ export interface CircuitComponent {
     terminals: string[];
     value: string;
     box?: number[][];
+    rotation?: number;
 }
 
 // Wire

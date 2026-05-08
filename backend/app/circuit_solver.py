@@ -52,6 +52,11 @@ def build_node_map(wires: List[Wire], grounds: List[PhysicalHole]) -> Tuple[Dict
         for wire in wires:
             # Wire format: [id, name, [foot1, foot2]]
             feet = wire[2]
+            
+            # Safety check: A wire must have exactly 2 endpoints to form a connection
+            if len(feet) < 2:
+                continue
+                
             # Convert physical feet to canonical rows (e.g. 'A1', 'F10')
             node1 = hole_to_node(feet[0])
             node2 = hole_to_node(feet[1])

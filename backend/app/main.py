@@ -7,7 +7,7 @@ import base64
 import os
 import json
 
-from app.models import AnalysisResponse, CircuitComponent, Wire
+from app.models import AnalysisResponse, CircuitComponent, Wire, NetlistRequest
 from app.ml_manager import ml_engine
 from app.cv_engine import (
     detect_and_warp,
@@ -16,7 +16,10 @@ from app.cv_engine import (
     extract_component_terminals,
     map_terminals_to_holes,
     detect_wires_yolo,
-    warp_with_points
+    warp_with_points,
+    extract_breadboard,
+    pre_warp_image,
+    detect_wires_classic
 )
 from app.circuit_solver import generate_spice_netlist
 
@@ -75,10 +78,66 @@ async def get_detected_corners(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/solve-circuit")
+async def solve_circuit(req: NetlistRequest):
+    """
+    Accepts updated components and wires from the frontend and returns the updated SPICE netlist.
+    """
+    try:
+        def map_type_to_cls_id(type_str: str) -> int:
+            ts = type_str.lower()
+            if "resistor" in ts: return 1
+            if "capacitor" in ts: return 2
+            if "led" in ts: return 6
+            if "transistor" in ts or "most" in ts: return 4
+            if "ic" in ts: return 7
+            if "voltage" in ts: return -1
+            return 7
+            
+        solver_components = []
+        for c in req.components:
+            cls_id = map_type_to_cls_id(c.type)
+            solver_components.append((cls_id, c.type, c.terminals, c.value))
+        
+        solver_wires = []
+        for w in req.wires:
+            solver_wires.append([w.id, f"Wire_{w.id}", w.endpoints])
+            
+        netlist = generate_spice_netlist(solver_components, solver_wires, req.grounds)
+        return {"netlist": netlist}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Netlist generation failed: {str(e)}")
+
+@app.post("/pre-warp")
+async def get_pre_warped_image(
+    file: UploadFile = File(...),
+    markers: str = Form(...)
+):
+    """
+    Returns an orthorectified 1600x1600 image based on 4 markers, used for drawing the crop box.
+    """
+    try:
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        pts = json.loads(markers)
+        warped = pre_warp_image(image, pts)
+        
+        _, buffer = cv2.imencode('.jpg', warped)
+        b64_image = base64.b64encode(buffer).decode('utf-8')
+        
+        return {"image": b64_image}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/analyze-image", response_model=AnalysisResponse)
 async def analyze_image(
     file: UploadFile = File(...),
-    calibration_points: Optional[str] = Form(None) # Make it a Form field!
+    calibration_points: Optional[str] = Form(None), # The 4 markers
+    crop_box: Optional[str] = Form(None) # The breadboard boundaries
 ):
     # 1. Read Image
     contents = await file.read()
@@ -92,54 +151,62 @@ async def analyze_image(
         # 2. CV Pipeline
         
         # A. Detect & Warp
-        grid_anchors = None
-        if calibration_points:
-            try:
-                pts = np.array(json.loads(calibration_points), dtype="float32")
-                if len(pts) >= 4:
-                    warp_corners = pts[:4]
-                    warped = warp_with_points(image, warp_corners)
-                    detected_corners = warp_corners.tolist()
-                    
-                    if len(pts) == 6:
-                        # Convert grid anchors from original image space to WARPED space!
-                        # We need the transform matrix M used for warping
-                        M = cv2.getPerspectiveTransform(warp_corners.astype("float32"), np.array([
-                            [0, 0], [928, 0], [928, 586], [0, 586]
-                        ], dtype="float32"))
-                        
-                        raw_anchors = pts[4:] # TL Hole, BR Hole
-                        # Transform raw image points to warped points
-                        ones = np.ones((len(raw_anchors), 1))
-                        raw_anchors_h = np.hstack([raw_anchors, ones])
-                        warped_anchors = (M @ raw_anchors_h.T).T
-                        warped_anchors = warped_anchors[:, :2] / warped_anchors[:, 2:]
-                        grid_anchors = warped_anchors.tolist()
-                else:
-                    raise ValueError("Calibration points must be at least 4 points")
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid calibration points format: {e}")
+        if calibration_points and crop_box:
+            pts = np.array(json.loads(calibration_points), dtype="float32")
+            box = json.loads(crop_box)
+            warped = extract_breadboard(image, pts.tolist(), box)
+            detected_corners = pts.tolist()
+        elif calibration_points:
+            # Legacy fallback
+            pts = np.array(json.loads(calibration_points), dtype="float32")
+            if len(pts) >= 4:
+                warp_corners = pts[:4]
+                warped = warp_with_points(image, warp_corners)
+                detected_corners = warp_corners.tolist()
         else:
             warped, detected_corners = detect_and_warp(image)
 
         # DEBUG: Generate Step-by-Step Verification Images
         debug_dir = "debug_outputs"
         os.makedirs(debug_dir, exist_ok=True)
-        cv2.imwrite(f"{debug_dir}/last_warped.jpg", warped)
+        cv2.imwrite(f"{debug_dir}/1_warped_board.jpg", warped)
         
         _, buffer = cv2.imencode('.jpg', warped)
         warped_b64 = base64.b64encode(buffer).decode('utf-8')
         
-        # B. Detect Holes (using anchors if provided)
-        holes_grid, pitch, padX, padY = detect_holes(warped, grid_anchors)
+        # B. Detect Holes (using static offsets)
+        holes_grid, pitch, padX, padY = detect_holes(warped)
         
-        # C. Detect Wires using YOLO Keypoints
-        wire_model = ml_engine.get_wire_model()
-        wires_data = detect_wires_yolo(warped, wire_model, holes_grid, pitch, padX, padY)
+        debug_holes = warped.copy()
+        for h in holes_grid:
+            cv2.circle(debug_holes, h, 2, (0, 255, 0), -1)
+        cv2.imwrite(f"{debug_dir}/2_holes.jpg", debug_holes)
         
-        # D. Detect YOLO Components
+        # C. Detect YOLO Components
         comp_model = ml_engine.get_component_model()
         raw_components = detect_components(warped, comp_model)
+        
+        debug_components = warped.copy()
+        for comp in raw_components:
+            _, class_name, coords = comp
+            pts = np.array(coords, np.int32).reshape((-1, 1, 2))
+            cv2.polylines(debug_components, [pts], True, (255, 0, 0), 2)
+            cv2.putText(debug_components, class_name, (int(coords[0][0]), int(coords[0][1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        cv2.imwrite(f"{debug_dir}/4_components.jpg", debug_components)
+
+        # D. Detect Wires using Classic Color Masks
+        # We pass raw_components so the engine can ignore those regions
+        wires_data = detect_wires_classic(warped, holes_grid, pitch, padX, padY, raw_components)
+        
+        debug_wires = warped.copy()
+        for w in wires_data:
+            path = w.get("path", [])
+            for i in range(len(path)-1):
+                pt1 = (int(path[i][0]), int(path[i][1]))
+                pt2 = (int(path[i+1][0]), int(path[i+1][1]))
+                cv2.line(debug_wires, pt1, pt2, (0, 165, 255), 3)
+        cv2.imwrite(f"{debug_dir}/3_wires.jpg", debug_wires)
+        
         comp_terminals = extract_component_terminals(raw_components)
         mapped_components = map_terminals_to_holes(comp_terminals, holes_grid, pitch, padX, padY)
         

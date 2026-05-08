@@ -4,6 +4,7 @@ from ultralytics import YOLO
 from typing import List, Tuple, Dict, Union, Optional
 from collections import deque
 import math
+import os
 
 # --- Type Definitions ---
 Point = Tuple[float, float]
@@ -14,12 +15,47 @@ RawComponent = Tuple[int, str, List[List[float]]] # (class_id, class_name, corne
 ComponentTerminals = Tuple[int, str, List[Point], List[List[float]]] # (class_id, class_name, [pin1, pin2, ...], original_box)
 MappedComponent = Tuple[int, str, List[str], List[HoleCoord]] # (class_id, class_name, [id1, id2, ...], [hole1, hole2, ...])
 
+def pre_warp_image(image: np.ndarray, markers: List[List[float]]) -> np.ndarray:
+    """
+    Warps the image so the markers form a perfect 800x500 rectangle in the center of a 1600x1600 canvas.
+    This orthorectifies the image without cutting off the edges.
+    """
+    canvas_size = (1600, 1600)
+    dst_rect = np.array([
+        [400, 550],         # TL
+        [1200, 550],        # TR
+        [1200, 1050],       # BR
+        [400, 1050]         # BL
+    ], dtype="float32")
+
+    M = cv2.getPerspectiveTransform(np.array(markers, dtype="float32"), dst_rect)
+    return cv2.warpPerspective(image, M, canvas_size)
+
+def extract_breadboard(image: np.ndarray, markers: List[List[float]], crop_box: Dict) -> np.ndarray:
+    """
+    Pre-warps the image, crops using the user-defined box, and resizes to standard 928x586.
+    """
+    pre_warped = pre_warp_image(image, markers)
+    
+    x = int(crop_box['x'])
+    y = int(crop_box['y'])
+    w = int(crop_box['width'])
+    h = int(crop_box['height'])
+    
+    # Safety bounds
+    x = max(0, x)
+    y = max(0, y)
+    w = min(1600 - x, w)
+    h = min(1600 - y, h)
+    
+    cropped = pre_warped[y:y+h, x:x+w]
+    return cv2.resize(cropped, (928, 586))
+
 def warp_with_points(image: np.ndarray, corners: np.ndarray) -> np.ndarray:
     """
-    Standardizes output to 928x586.
+    Legacy fallback. Standardizes output to 928x586.
     """
     output_dim = (928, 586)
-    # Destination points match the absolute corners of the 928x586 board area
     dst_rect = np.array([
         [0, 0],         # TL
         [928, 0],       # TR
@@ -78,27 +114,14 @@ def detect_and_warp(image: np.ndarray) -> Tuple[np.ndarray, List[List[float]]]:
     warped = warp_with_points(image, ordered_centers)
     return warped, ordered_centers.tolist()
 
-def detect_holes(warped_image: np.ndarray, anchors: Optional[List[List[float]]] = None) -> Tuple[List[HoleCoord], float, float, float]:
+def detect_holes(warped_image: np.ndarray) -> Tuple[List[HoleCoord], float, float, float]:
     """
     Stable 6-point anchor grid calculation.
     """
-    # Default Fallbacks
     pitch = 14.15
     paddingX = 26
     paddingY = 22
 
-    if anchors and len(anchors) == 2:
-        p1 = anchors[0] # A1 (Col 0, Row 4)
-        p2 = anchors[1] # J63 (Col 62, Row 35)
-        
-        # 62 cols apart, 31 rows apart (35 - 4)
-        pitch_h = (p2[0] - p1[0]) / 62.0
-        pitch_v = (p2[1] - p1[1]) / 31.0
-        pitch = (pitch_h + pitch_v) / 2.0
-        
-        paddingX = p1[0]
-        paddingY = p1[1] - (4 * pitch)
-        
     rows_relative = [1, 2, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 17, 18]
     row_targets = []
     for yBase in [0, 20]:
@@ -252,17 +275,25 @@ def detect_wires_yolo(image: np.ndarray, model: YOLO, holes: List[HoleCoord], pi
     """
     Detects jumper wires using Keypoint detection and maps endpoints to breadboard hole labels.
     """
-    results = model(image)[0]
+    # Lowered confidence threshold (conf=0.15) to help detect low-contrast wires like white-on-white
+    results = model.predict(source=image, conf=0.15)[0]
     all_wire_data = []
     
     # Pre-map holes for lookups
     hole_labels = map_to_breadboard_ids(holes, pitch, paddingX, paddingY)
     hole_to_label = {holes[i]: hole_labels[i] for i in range(len(holes))}
     
+    if not hasattr(results, 'keypoints') or results.keypoints is None:
+        return all_wire_data
+        
     for idx, kpts in enumerate(results.keypoints.xy):
         if kpts.shape[0] < 2: continue
         x1, y1 = float(kpts[0][0]), float(kpts[0][1])
         x2, y2 = float(kpts[1][0]), float(kpts[1][1])
+        
+        # Skip if keypoints are missing (Ultralytics returns [0, 0] for unseen keypoints)
+        if (x1 == 0 and y1 == 0) or (x2 == 0 and y2 == 0):
+            continue
         
         # Find closest holes
         def nearest_hole(pt):
@@ -282,4 +313,201 @@ def detect_wires_yolo(image: np.ndarray, model: YOLO, holes: List[HoleCoord], pi
                  "path": path
              })
 
+    return all_wire_data
+
+def extract_color_masks_engine(image: np.ndarray, components: List = []) -> dict:
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    height, width, _ = image.shape
+    
+    color_ranges = {
+        'Red': [
+            (np.array([0, 70, 70]), np.array([9, 255, 255])),
+            (np.array([170, 70, 70]), np.array([180, 255, 255]))
+        ],
+        'Orange': [
+            (np.array([10, 70, 100]), np.array([24, 255, 255]))
+        ],
+        'Yellow': [
+            (np.array([25, 70, 70]), np.array([35, 255, 255]))
+        ],
+        'Green': [
+            (np.array([36, 70, 70]), np.array([85, 255, 255]))
+        ],
+        'Blue': [
+            (np.array([86, 70, 70]), np.array([125, 255, 255]))
+        ],
+        'Purple': [
+            (np.array([126, 70, 70]), np.array([150, 255, 255]))
+        ],
+        'Pink': [
+            (np.array([151, 70, 70]), np.array([169, 255, 255]))
+        ],
+        'Brown': [
+            (np.array([10, 70, 30]), np.array([24, 255, 99]))
+        ],
+        'Black': [
+            (np.array([0, 0, 0]), np.array([180, 150, 85]))
+        ]
+    }
+    
+    color_masks = {}
+    debug_mask_dir = "debug_outputs/masks"
+    os.makedirs(debug_mask_dir, exist_ok=True)
+    
+    for color_name, bounds in color_ranges.items():
+        mask = np.zeros((height, width), dtype=np.uint8)
+        for lower, upper in bounds:
+            current_mask = cv2.inRange(hsv, lower, upper)
+            mask = cv2.bitwise_or(mask, current_mask)
+        
+        kernel_open = np.ones((3,3), np.uint8)
+        # Use a CROSS kernel for closing. It is less likely to merge parallel wires
+        # while still being able to bridge perpendicular gaps.
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_CROSS, (15, 15))
+        
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
+        
+        # Zero out the outer 25 pixels to ignore the green/red/blue painted stencils on the plastic border
+        mask[0:25, :] = 0
+        mask[-25:, :] = 0
+        mask[:, 0:25] = 0
+        mask[:, -25:] = 0
+        
+        color_masks[color_name] = mask
+        cv2.imwrite(f"{debug_mask_dir}/{color_name}_mask.jpg", mask)
+        
+    # --- Component Masking Logic ---
+    # Zero out the regions occupied by detected components (resistors, LEDs, etc.)
+    # to prevent them from being detected as wires.
+    for color_name in color_masks:
+        mask = color_masks[color_name]
+        for comp in components:
+            cls_id, name, coords = comp 
+            # SKIP if the component is the breadboard itself!
+            if name.lower() == "breadboard":
+                continue
+                
+            pts = np.array(coords, np.int32).reshape((-1, 1, 2))
+            cv2.fillPoly(mask, [pts], 0)
+            
+    # --- Mask Healing Logic ---
+    # Create a union of all detected wire colors
+    combined_wire_mask = np.zeros((height, width), dtype=np.uint8)
+    for m in color_masks.values():
+        combined_wire_mask = cv2.bitwise_or(combined_wire_mask, m)
+        
+    # For each mask, heal gaps by performing a large closing, but ONLY allowing it
+    # to 'steal' pixels from the combined_wire_mask. This bridges overlaps without
+    # bleeding into the white breadboard plastic.
+    kernel_heal = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
+    for color_name in color_masks:
+        m = color_masks[color_name]
+        # Bridge the gaps
+        healed = cv2.morphologyEx(m, cv2.MORPH_CLOSE, kernel_heal)
+        # Constrain to only where SOME color was detected
+        color_masks[color_name] = cv2.bitwise_and(healed, combined_wire_mask)
+        
+    return color_masks
+
+def detect_wires_classic(image: np.ndarray, holes: List[HoleCoord], pitch: float, paddingX: float, paddingY: float, components: List = []) -> List[Dict]:
+    hole_labels = map_to_breadboard_ids(holes, pitch, paddingX, paddingY)
+    hole_to_label = {holes[i]: hole_labels[i] for i in range(len(holes))}
+    
+    color_masks = extract_color_masks_engine(image, components)
+    
+    all_wire_data = []
+    
+    for color_name, mask in color_masks.items():
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        
+        connections = []
+        for i in range(1, num_labels):
+            area = stats[i, cv2.CC_STAT_AREA]
+            if area < 100:
+                continue
+                
+            comp_mask = (labels == i).astype(np.uint8)
+            pts = np.argwhere(comp_mask > 0)
+            if len(pts) == 0:
+                continue
+            start_pt = (int(pts[0][1]), int(pts[0][0]))
+            
+            from collections import deque
+            def bfs_furthest(m, start):
+                h, w = m.shape
+                visited = np.zeros((h, w), dtype=bool)
+                q = deque([start])
+                visited[start[1], start[0]] = True
+                last_pt = start
+                dx = [-1, 1, 0, 0, -1, -1, 1, 1]
+                dy = [0, 0, -1, 1, -1, 1, -1, 1]
+                while q:
+                    x, y = q.popleft()
+                    last_pt = (x, y)
+                    for j in range(8):
+                        nx, ny = x + dx[j], y + dy[j]
+                        if 0 <= nx < w and 0 <= ny < h:
+                            if m[ny, nx] > 0 and not visited[ny, nx]:
+                                visited[ny, nx] = True
+                                q.append((nx, ny))
+                return last_pt
+                
+            E1 = bfs_furthest(comp_mask, start_pt)
+            E2 = bfs_furthest(comp_mask, E1)
+            
+            def nearest_hole(pt):
+                return min(holes, key=lambda h: (h[0]-pt[0])**2 + (h[1]-pt[1])**2)
+                
+            if holes:
+                H1 = nearest_hole(E1)
+                H2 = nearest_hole(E2)
+                if H1 != H2:
+                    connections.append((H1, H2))
+        
+        # Smart Merge: Join segments of the same color that are collinear and close to each other.
+        # This "heals" wires that are split into two blobs by an overlapping wire of a different color.
+        smart_merged = True
+        while smart_merged:
+            smart_merged = False
+            for i in range(len(connections)):
+                for j in range(i + 1, len(connections)):
+                    p1, p2 = connections[i]
+                    p3, p4 = connections[j]
+                    
+                    # Try all 4 endpoint pairings to find the closest gap between segments
+                    pairings = [
+                        (p1, p2, p3, p4), (p1, p2, p4, p3),
+                        (p2, p1, p3, p4), (p2, p1, p4, p3)
+                    ]
+                    
+                    for A, B, C, D in pairings:
+                        # B and C are the internal endpoints facing the gap
+                        gap_dist = math.sqrt((B[0]-C[0])**2 + (B[1]-C[1])**2)
+                        
+                        # If the gap is small (e.g. less than 4 hole pitches)
+                        if gap_dist < 4 * pitch:
+                            # Check for collinearity: is the path A -> B -> C -> D roughly a straight line?
+                            d_AB = math.sqrt((B[0]-A[0])**2 + (B[1]-A[1])**2)
+                            d_CD = math.sqrt((D[0]-C[0])**2 + (D[1]-C[1])**2)
+                            d_AD = math.sqrt((D[0]-A[0])**2 + (D[1]-A[1])**2)
+                            
+                            # If they are collinear, then dist(A,B) + dist(B,C) + dist(C,D) ≈ dist(A,D)
+                            if abs((d_AB + gap_dist + d_CD) - d_AD) < 0.5 * pitch:
+                                connections.pop(j)
+                                connections.pop(i)
+                                connections.append((A, D))
+                                smart_merged = True
+                                break
+                    if smart_merged: break
+                
+        for H1, H2 in connections:
+            mid_point = (H2[0], H1[1])
+            path = [H1, mid_point, H2]
+            all_wire_data.append({
+                "color": color_name,
+                "endpoints": [hole_to_label.get(H1, "UNK"), hole_to_label.get(H2, "UNK")],
+                "path": path
+            })
+            
     return all_wire_data

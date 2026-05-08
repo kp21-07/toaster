@@ -5,9 +5,9 @@ import { UploadArea } from './components/UploadArea';
 import { NetlistViewer } from './components/NetlistViewer';
 import { ComponentList } from './components/ComponentList';
 import { VirtualBreadboard } from './components/VirtualBreadboard';
-import { analyzeImage } from './api/client';
+import { analyzeImage, solveCircuit } from './api/client';
 import type { AnalysisResponse, CircuitComponent } from './types';
-import { RefreshCw, Plus, Undo, Redo, Download, Upload, Target } from 'lucide-react';
+import { RefreshCw, Plus, Undo, Redo, Download, Upload, Target, Image } from 'lucide-react';
 import { autoRouteCircuit } from './utils/breadboardRouter';
 import { CalibrationOverlay } from './components/CalibrationOverlay';
 
@@ -63,31 +63,45 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [history, future, data]);
 
+  const processImage = async (fileToProcess: File, markers?: number[][], cropBox?: any) => {
+    setIsLoading(true);
+    try {
+      const result = await analyzeImage(fileToProcess, markers, cropBox);
+      setData(result);
+      setHistory([]);
+      setFuture([]);
+      toast.success(markers ? "Calibration applied and analyzed!" : "Analysis complete!");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.response?.data?.detail || "Analysis failed.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile);
     setData(null);
     setHistory([]);
     setFuture([]);
-    // Mandatory Calibration: Open the overlay instead of analyzing immediately
+    
+    // We only use cached cropBox. Markers always need to be verified because the camera moves.
     setIsCalibrating(true);
   };
 
-  const handleCalibrationComplete = async (points: number[][]) => {
+  const handleCalibrationComplete = async (markers: number[][], cropBox?: any) => {
     if (!file) return;
     setIsCalibrating(false);
-    setIsLoading(true);
-    try {
-      const result = await analyzeImage(file, points);
-      setData(result);
-      setHistory([]);
-      setFuture([]);
-      toast.success("Calibration applied and re-analyzed!");
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err.response?.data?.detail || "Calibration failed.");
-    } finally {
-      setIsLoading(false);
+    
+    if (cropBox) {
+        localStorage.setItem('breadboardCropBox', JSON.stringify(cropBox));
     }
+    
+    // If we didn't get a new cropBox from the UI, we must have one in localStorage
+    const savedCropBoxStr = localStorage.getItem('breadboardCropBox');
+    const finalCropBox = cropBox || (savedCropBoxStr ? JSON.parse(savedCropBoxStr) : undefined);
+    
+    await processImage(file, markers, finalCropBox);
   };
 
   const handleReset = () => {
@@ -101,27 +115,25 @@ function App() {
     updateDataWithHistory(prev => prev ? { ...prev, components: updatedComponents } : prev);
   };
 
-  const generateSpiceNetlist = (components: CircuitComponent[]) => {
-    let spice = "* Auto-generated Netlist from Interactive Board\n";
-    components.forEach(c => {
-       const terminals = c.terminals ? c.terminals.join(' ') : '';
-       spice += `${c.name} ${terminals} ${c.value}\n`;
-    });
-    spice += ".end\n";
-    return spice;
-  };
-
-  const handleUpdateBoard = () => {
+  const handleUpdateBoard = async () => {
     if (data) {
-      const electricallyRoutedComponents = autoRouteCircuit(data.components, data.wires || []);
-      const newNetlist = generateSpiceNetlist(electricallyRoutedComponents);
-      updateDataWithHistory({ ...data, components: electricallyRoutedComponents, netlist: newNetlist });
-      toast.success("Electrical paths routed & Netlist updated.");
+      try {
+        const electricallyRoutedComponents = autoRouteCircuit(data.components, data.wires || []);
+        
+        // Use Backend as Source of Truth
+        const response = await solveCircuit(electricallyRoutedComponents, data.wires || []);
+        
+        updateDataWithHistory({ ...data, components: electricallyRoutedComponents, netlist: response.netlist });
+        toast.success("Electrical paths routed & Netlist updated from Backend.");
+      } catch (err: any) {
+        console.error(err);
+        toast.error("Failed to solve circuit. Check connections.");
+      }
     }
   };
 
   const confirmUpdateBoard = () => {
-     if (window.confirm("Update Board and recalculate SPICE Netlist nodes natively?")) {
+     if (window.confirm("Update Board and recalculate SPICE Netlist via Backend Solver?")) {
         handleUpdateBoard();
      }
   };
@@ -219,7 +231,8 @@ function App() {
            [componentX + 60, componentY + 20],
            [componentX, componentY + 20]
          ],
-         terminals: Array(numTerminals).fill('?')
+         terminals: Array(numTerminals).fill('?'),
+         rotation: 0
      };
      
      updateDataWithHistory(prev => prev ? {
@@ -300,7 +313,7 @@ function App() {
                <Download size={16} /> Save
              </button>
              <button onClick={() => setShowPhotoOverlay(!showPhotoOverlay)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: showPhotoOverlay ? '#3b82f6' : '#f8fafc', color: showPhotoOverlay ? 'white' : '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Show original photo under the grid">
-               <Target size={16} /> {showPhotoOverlay ? 'Hide Photo' : 'Show Photo'}
+               <Image size={16} /> {showPhotoOverlay ? 'Hide Photo' : 'Show Photo'}
              </button>
              <button onClick={() => setIsCalibrating(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '0.5rem 1rem', background: '#f8fafc', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }} title="Manually calibrate board corners">
                <Target size={16} /> Calibrate

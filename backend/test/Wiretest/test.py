@@ -47,9 +47,16 @@ def generate_global_grid(holes: List[HoleCoord]) -> List[HoleCoord]:
 
 def detect_holes(image: np.ndarray) -> List[HoleCoord]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    cv2.imwrite("test/Wiretest/debug/0_gray.jpg", gray)
+    
     _, thresh = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY_INV)
+    cv2.imwrite("test/Wiretest/debug/1_thresh.jpg", thresh)
     
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    debug_contours = image.copy()
+    cv2.drawContours(debug_contours, contours, -1, (0, 0, 255), 1)
+    cv2.imwrite("test/Wiretest/debug/2_contours.jpg", debug_contours)
     
     hole_centers = []
     
@@ -63,6 +70,11 @@ def detect_holes(image: np.ndarray) -> List[HoleCoord]:
                     cX = int(M["m10"] / M["m00"])
                     cY = int(M["m01"] / M["m00"])
                     hole_centers.append((cX, cY))
+                    
+    debug_filtered = image.copy()
+    for (cX, cY) in hole_centers:
+        cv2.circle(debug_filtered, (cX, cY), 2, (0, 255, 0), -1)
+    cv2.imwrite("test/Wiretest/debug/3_holes.jpg", debug_filtered)
     
     return generate_global_grid(hole_centers)
 
@@ -113,16 +125,20 @@ def extract_color_masks(image: np.ndarray) -> Dict[str, np.ndarray]:
     color_masks = {}
     kernel_open = np.ones((3, 3), np.uint8)
     kernel_close = np.ones((15, 15), np.uint8)
-    for color_name, ranges in color_ranges.items():
-        color_mask = np.zeros((height, width), dtype=np.uint8)
-        for lower, upper in ranges:
-            mask = cv2.inRange(hsv, lower, upper)
-            color_mask = cv2.bitwise_or(color_mask, mask)
-        # Close to connect broken segments of the same wire
-        color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, kernel_close)
-        # Open to remove noise
-        color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_OPEN, kernel_open)
-        color_masks[color_name] = color_mask
+    for color_name, bounds in color_ranges.items():
+        mask = np.zeros((height, width), dtype=np.uint8)
+        for lower, upper in bounds:
+            current_mask = cv2.inRange(hsv, lower, upper)
+            mask = cv2.bitwise_or(mask, current_mask)
+        
+        # Morphological operations to clean up masks
+        kernel = np.ones((3,3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        
+        color_masks[color_name] = mask
+        cv2.imwrite(f"test/Wiretest/debug/4_mask_{color_name}.jpg", mask)
+        
     return color_masks
 
 def extract_wires(mask: np.ndarray, holes: List[HoleCoord]) -> List[WireConnection]:
@@ -180,6 +196,10 @@ def extract_wires(mask: np.ndarray, holes: List[HoleCoord]) -> List[WireConnecti
             
             if H1 != H2:
                 connections.append((H1, H2))
+        else:
+            # Fallback for debugging: if no holes were detected, just return the raw endpoints
+            if E1 != E2:
+                connections.append((E1, E2))
                 
     # Post-processing: Merge broken segments of occluded wires that snapped to the same hole
     merged = True
@@ -253,9 +273,10 @@ def main(image_path: str):
     for start_node, end_node in all_connections:
         print(f"  -> Traced Wire: {start_node} <-> {end_node}")
                 
-    output_path = "test/Wiretest/debug_detected_grid.jpg"
+    output_path = "test/Wiretest/debug/detected_grid.jpg"
     cv2.imwrite(output_path, vis_image)
     print(f"\nSaved analysis visualization to {output_path}")
 
 if __name__ == "__main__":
-    main("test/Wiretest/test_data/image6.png")
+    # main("test/Wiretest/test_data/image6.png")
+    main("debug_outputs/1_warped_board.jpg")

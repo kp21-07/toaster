@@ -1,38 +1,58 @@
-# Toaster Project
+# Toaster 🍞
 
-## Backend Setup
+**Toaster** is an AI-powered tool that converts physical breadboard photos into digital SPICE netlists. It uses Computer Vision (FastAPI + OpenCV + YOLO) to detect components and wires, providing an interactive virtual breadboard for circuit verification and simulation.
 
-The backend is built with FastAPI and utilizes `uv` for high-performance Python package management.
+---
 
-### Prerequisites
+## 🚀 Features
 
-- **uv**: An extremely fast Python package installer and resolver.
-  - Install via curl: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-  - Or via pip: `pip install uv`
-  - For more installation methods, visit [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/)
+- **AI Detection:** Automatically identifies Resistors, Capacitors, LEDs, Transistors, and ICs from a photo.
+- **Interactive Virtual Breadboard:** Drag, drop, rotate, and edit components to match your physical layout.
+- **Smart Wire Tracing:** Detects jumper wires and maps them to the breadboard grid.
+- **SPICE Generation:** Instantly generates a `.cir` netlist compatible with LTSpice, NGSpice, and other solvers.
+- **Calibration Wizard:** Simple 4-point calibration to correct perspective distortion from any camera angle.
 
-### Installation & Running
+---
 
-1. **Navigate to the backend directory:**
+## 🛠️ Tech Stack
+
+- **Frontend:** React, TypeScript, Vite, Lucide Icons.
+- **Backend:** FastAPI (Python), OpenCV, YOLOv8 (Ultralytics), NumPy.
+- **Solver Logic:** Custom graph-based routing and SPICE template engine.
+
+---
+
+## 📦 Setup & Installation
+
+### Backend
+1. **Prerequisites:** Install [uv](https://astral.sh/uv/) for high-performance package management.
+2. **Install & Run:**
    ```bash
    cd backend
-   ```
-
-2. **Sync dependencies:**
-   This command creates the virtual environment and installs all locked dependencies.
-   ```bash
    uv sync
-   ```
-
-3. **Run the server:**
-   Start the backend server with hot-reloading enabled.
-   ```bash
    uv run uvicorn app.main:app --reload
    ```
+3. **Weights:** Place your YOLO models (`best_components.pt`, `best_wires.pt`) in `backend/weights/`.
 
-   The API will be available at `http://localhost:8000`.
-   API Documentation (Swagger UI) is available at `http://localhost:8000/docs`.
+### Frontend
+1. **Prerequisites:** Node.js (v18+).
+2. **Install & Run:**
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
 
-### Specific Notes
-- **Weights**: Ensure model weights (`best_components.pt`, `best_wires.pt`) are present in the `backend/weights/` directory.
-- **Python Version**: This project requires Python 3.12+ (managed automatically by `uv`).
+---
+
+## 🌍 Hosting
+
+The backend is built as a container-ready FastAPI app. For production deployment:
+1. **Docker:** Use a Dockerfile that includes `libgl1` (OpenCV dependency).
+2. **Reverse Proxy:** Use Nginx to handle SSL and proxy to the Uvicorn server (port 8000).
+3. **Hardware:** A server with at least 2GB RAM is recommended to load the YOLO models efficiently.
+
+---
+
+## 📜 License
+MIT

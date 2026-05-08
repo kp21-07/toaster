@@ -1,11 +1,42 @@
 import React, { useState, useMemo } from 'react';
-import { Cpu, Hash, Tag, Trash2, Crosshair } from 'lucide-react';
+import { Cpu, Hash, Tag, Trash2, Crosshair, RotateCcw, RotateCw } from 'lucide-react';
 import type { CircuitComponent } from '../types';
 import './VirtualBreadboard.css';
 import { BreadboardBackground } from './BreadboardBackground';
+import { ComponentVisuals } from './ComponentVisuals';
 import { snapToHole, pitch, paddingX, paddingY } from '../utils/breadboardMath';
 import { buildRoutingGraph, getPhysicalNodeId } from '../utils/breadboardRouter';
 import { generateVisualPath, manhattanize } from '../utils/wirePathing';
+
+const getComponentTips = (c: CircuitComponent) => {
+  if (!c.box) return [];
+  const xs = c.box.map(p => p[0]);
+  const ys = c.box.map(p => p[1]);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const w = Math.max(...xs) - minX;
+  const h = Math.max(...ys) - minY;
+  const cx = minX + w / 2;
+  const cy = minY + h / 2;
+  const rad = ((c.rotation || 0) * Math.PI) / 180;
+
+  const getRotated = (ox: number, oy: number) => ({
+    x: cx + ox * Math.cos(rad) - oy * Math.sin(rad),
+    y: cy + ox * Math.sin(rad) + oy * Math.cos(rad)
+  });
+
+  const tips = [];
+  if (c.terminals && c.terminals.length >= 1) {
+    tips.push(getRotated(-w / 2 - 20, 0));
+  }
+  if (c.terminals && c.terminals.length >= 2) {
+    tips.push(getRotated(w / 2 + 20, 0));
+  }
+  if (c.terminals && c.terminals.length >= 3) {
+    tips.push(getRotated(0, -h / 2 - 20));
+  }
+  return tips;
+};
 
 
 
@@ -76,6 +107,17 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
   React.useEffect(() => { setLocalComponents(components); }, [components]);
   React.useEffect(() => { setLocalWires(wires); }, [wires]);
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'r' && selectedCompId !== null && !['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) {
+        const nextRotation = ((editForm.rotation || 0) + 90) % 360;
+        setEditForm(prev => ({ ...prev, rotation: nextRotation }));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedCompId, editForm.rotation]);
+
   const getSnapPreviews = () => {
     if (!draggingItem) return [];
     
@@ -89,31 +131,11 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
     } else if (draggingItem.type === 'component') {
        const c = localComponents.find(c => c.id === draggingItem.itemId);
        if (c && c.box) {
-          const xs = c.box.map(p => p[0]);
-          const ys = c.box.map(p => p[1]);
-          let minX = Math.min(...xs);
-          let minY = Math.min(...ys);
-          const wPx = Math.max(...xs) - minX;
-          const hPx = Math.max(...ys) - minY;
-
-          const centerY = minY + hPx / 2;
-          const snappedY = snapToHole(0, centerY).y;
-          
-          const previews = [];
-          if (c.terminals && c.terminals.length >= 1) {
-             const leftTip = minX - 20;
-             previews.push({ x: snapToHole(leftTip, 0).x, y: snappedY });
-          }
-          if (c.terminals && c.terminals.length >= 2) {
-             const rightTip = minX + wPx + 20;
-             previews.push({ x: snapToHole(rightTip, 0).x, y: snappedY });
-          }
-          if (c.terminals && c.terminals.length >= 3) {
-             const topTipX = minX + wPx / 2;
-             const topTipY = minY - 20;
-             previews.push({ x: snapToHole(topTipX, 0).x, y: snapToHole(0, topTipY).y });
-          }
-          return previews;
+          const tips = getComponentTips(c);
+          return tips.map(t => {
+            const snapped = snapToHole(t.x, t.y);
+            return { x: snapped.x, y: snapped.y };
+          });
        }
     }
     return [];
@@ -219,23 +241,14 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
     if (draggingItem.type === 'component') {
        let updatedComps = [...localComponents].map(c => {
           if (c.id === draggingItem.itemId && c.box) {
-              const xs = c.box.map(p => p[0]);
-              const ys = c.box.map(p => p[1]);
-              let minX = Math.min(...xs);
-              let minY = Math.min(...ys);
-              const wPx = Math.max(...xs) - minX;
-              const hPx = Math.max(...ys) - minY;
-
-              const centerY = minY + hPx / 2;
-              const snappedY = snapToHole(0, centerY).y;
-              minY = snappedY - hPx / 2;
-
-              // Snap left leg horizontally
-              const tipX = minX - 20;
-              const snappedTipX = snapToHole(tipX, 0).x;
-              minX = snappedTipX + 20;
-              
-              return { ...c, box: [[minX, minY], [minX + wPx, minY], [minX + wPx, minY + hPx], [minX, minY + hPx]] };
+              const tips = getComponentTips(c);
+              if (tips.length > 0) {
+                  const primaryTip = tips[0];
+                  const snappedTip = snapToHole(primaryTip.x, primaryTip.y);
+                  const dx = snappedTip.x - primaryTip.x;
+                  const dy = snappedTip.y - primaryTip.y;
+                  return { ...c, box: c.box!.map(p => [p[0] + dx, p[1] + dy]) };
+              }
           }
           return c;
        });
@@ -277,6 +290,11 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
   const handleCancel = () => {
     setSelectedCompId(null);
     setPickingTerminalIdx(null);
+  };
+
+  const handleRotate = () => {
+    const nextRotation = ((editForm.rotation || 0) + 90) % 360;
+    setEditForm({ ...editForm, rotation: nextRotation });
   };
 
   return (
@@ -393,12 +411,15 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
         
         <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 5, pointerEvents: 'none' }}>
           {localComponents.map(comp => {
+            const isSelected = selectedCompId === comp.id;
+            const displayComp = isSelected ? { ...comp, ...editForm } as CircuitComponent : comp;
+            
             let style: React.CSSProperties = { position: 'relative' };
             let isSlim = false;
 
-            if (comp.box && comp.box.length === 4) {
-              const xs = comp.box.map(p => p[0]);
-              const ys = comp.box.map(p => p[1]);
+            if (displayComp.box && displayComp.box.length === 4) {
+              const xs = displayComp.box.map(p => p[0]);
+              const ys = displayComp.box.map(p => p[1]);
               
               let minX = Math.min(...xs);
               let minY = Math.min(...ys);
@@ -422,14 +443,14 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
                 flexDirection: isSlim ? 'row' : 'column',
                 gap: isSlim ? '0.4rem' : '0',
                 pointerEvents: 'auto',
-                cursor: draggingItem?.itemId === comp.id ? 'grabbing' : 'grab'
+                cursor: draggingItem?.itemId === displayComp.id ? 'grabbing' : 'grab'
               };
             }
 
             return (
               <div 
-                key={comp.id} 
-                className={`board-component ${selectedCompId === comp.id ? 'selected' : ''}`}
+                key={displayComp.id} 
+                className={`board-component ${isSelected ? 'selected' : ''}`}
                 onClick={() => {
                    if (hasDragged) return;
                    handleComponentClick(comp);
@@ -439,44 +460,18 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
                    if ((e.target as HTMLElement).tagName === 'INPUT') return;
                    
                    const coords = getCoords(e);
-                   const xs = comp.box!.map(p => p[0]);
-                   const ys = comp.box!.map(p => p[1]);
-                   setDraggingItem({ type: 'component', itemId: comp.id, offsetX: coords.x - Math.min(...xs), offsetY: coords.y - Math.min(...ys) });
+                   const xs = displayComp.box!.map(p => p[0]);
+                   const ys = displayComp.box!.map(p => p[1]);
+                   setDraggingItem({ type: 'component', itemId: displayComp.id, offsetX: coords.x - Math.min(...xs), offsetY: coords.y - Math.min(...ys) });
                    setHasDragged(false);
                 }}
-                style={style}
+                style={{
+                  ...style,
+                  transform: `rotate(${displayComp.rotation || 0}deg)`,
+                  transformOrigin: 'center center'
+                }}
               >
-                {/* Floating terminal labels securely anchored via explicit logical drops */}
-                {comp.terminals && comp.terminals.length >= 1 && (
-                  <>
-                    <div style={{ position: 'absolute', top: '50%', left: '-20px', width: '20px', height: '4px', backgroundColor: '#94a3b8', transform: 'translateY(-50%)', zIndex: -1, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.5)', borderRadius: '2px 0 0 2px' }} />
-                    <div style={{ position: 'absolute', top: '50%', left: '-20px', width: '6px', height: '6px', backgroundColor: '#cbd5e1', borderRadius: '50%', transform: 'translate(-50%, -50%)', zIndex: -1, border: '1px solid #475569' }} />
-                    <div className="comp-pin-label" style={{ position: 'absolute', top: '50%', left: '-20px', transform: 'translate(-100%, -50%)', background: '#fef08a', color: '#854d0e', padding: '1px 6px', fontSize: '0.65rem', borderRadius: 4, whiteSpace: 'nowrap', fontWeight: 600, border: '1px solid #fde047', pointerEvents: 'none' }}>
-                      {comp.terminals[0]}
-                    </div>
-                  </>
-                )}
-                {comp.terminals && comp.terminals.length >= 2 && (
-                  <>
-                    <div style={{ position: 'absolute', top: '50%', right: '-20px', width: '20px', height: '4px', backgroundColor: '#94a3b8', transform: 'translateY(-50%)', zIndex: -1, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.5)', borderRadius: '0 2px 2px 0' }} />
-                    <div style={{ position: 'absolute', top: '50%', right: '-20px', width: '6px', height: '6px', backgroundColor: '#cbd5e1', borderRadius: '50%', transform: 'translate(50%, -50%)', zIndex: -1, border: '1px solid #475569' }} />
-                    <div className="comp-pin-label" style={{ position: 'absolute', top: '50%', right: '-20px', transform: 'translate(100%, -50%)', background: '#fef08a', color: '#854d0e', padding: '1px 6px', fontSize: '0.65rem', borderRadius: 4, whiteSpace: 'nowrap', fontWeight: 600, border: '1px solid #fde047', pointerEvents: 'none' }}>
-                      {comp.terminals[1]}
-                    </div>
-                  </>
-                )}
-                {comp.terminals && comp.terminals.length >= 3 && (
-                  <>
-                    <div style={{ position: 'absolute', top: '-20px', left: '50%', width: '4px', height: '20px', backgroundColor: '#94a3b8', transform: 'translateX(-50%)', zIndex: -1, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.5)', borderRadius: '2px 2px 0 0' }} />
-                    <div style={{ position: 'absolute', top: '-20px', left: '50%', width: '6px', height: '6px', backgroundColor: '#cbd5e1', borderRadius: '50%', transform: 'translate(-50%, -50%)', zIndex: -1, border: '1px solid #475569' }} />
-                    <div className="comp-pin-label" style={{ position: 'absolute', top: '-20px', left: '50%', transform: 'translate(-50%, -100%)', background: '#fef08a', color: '#854d0e', padding: '1px 6px', fontSize: '0.65rem', borderRadius: 4, whiteSpace: 'nowrap', fontWeight: 600, border: '1px solid #fde047', pointerEvents: 'none' }}>
-                      {comp.terminals[2]}
-                    </div>
-                  </>
-                )}
-
-                <span className="comp-name" style={{ fontSize: '1rem', textAlign: 'center', lineHeight: 1.2 }}>{comp.name}</span>
-                <span className="comp-value" style={{ fontSize: '0.8rem', marginTop: isSlim ? 0 : 2 }}>{comp.value}</span>
+                <ComponentVisuals component={displayComp} isSlim={isSlim} />
               </div>
             );
           })}
@@ -514,7 +509,7 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
 
             <div className="edit-field">
               <label><Crosshair size={14} /> Terminals</label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '160px', overflowY: 'auto', paddingRight: '4px' }}>
                 {(editForm.terminals || []).map((t, idx) => (
                   <div key={idx} style={{ display: 'flex', gap: '0.4rem' }}>
                     <input 
@@ -562,6 +557,27 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
               </select>
             </div>
 
+            <div className="edit-field">
+              <label><RotateCcw size={14} /> Rotation</label>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <button 
+                  onClick={() => setEditForm({...editForm, rotation: ((editForm.rotation || 0) - 90 + 360) % 360})}
+                  style={{ flex: 1, padding: '0.4rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
+                  title="Rotate Left 90°"
+                >
+                  <RotateCcw size={18} />
+                </button>
+                <span style={{ fontSize: "0.85rem", fontWeight: 600, width: "40px", textAlign: 'center' }}>{editForm.rotation || 0}°</span>
+                <button 
+                  onClick={() => setEditForm({...editForm, rotation: ((editForm.rotation || 0) + 90) % 360})}
+                  style={{ flex: 1, padding: '0.4rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: 'white', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
+                  title="Rotate Right 90°"
+                >
+                  <RotateCw size={18} />
+                </button>
+              </div>
+            </div>
+
             <div className="edit-actions">
               <button className="btn-save" onClick={handleSave}>
                 Apply Changes
@@ -581,6 +597,24 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
                 <Trash2 size={18} />
               </button>
               <button className="btn-cancel" onClick={handleCancel}>Cancel</button>
+              <button 
+                className="btn-rotate" 
+                onClick={handleRotate}
+                title="Rotate 90°"
+                style={{
+                   padding: '0.4rem',
+                   borderRadius: '8px',
+                   border: '1px solid #cbd5e1',
+                   background: 'white',
+                   color: '#64748b',
+                   cursor: 'pointer',
+                   display: 'flex',
+                   alignItems: 'center',
+                   justifyContent: 'center'
+                }}
+              >
+                <RotateCcw size={18} />
+              </button>
             </div>
           </div>
         </>
