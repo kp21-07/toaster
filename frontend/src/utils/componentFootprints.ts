@@ -72,11 +72,20 @@ export const FOOTPRINTS: Record<string, Footprint> = {
     bodyColor: '#16a34a',        // green battery
   },
   ic: {
-    defaultSpan: 7, // A 14-pin IC spans 7 columns (0 to 6)
+    defaultSpan: 6, // 14 pins = 7 per side = 6 pitch gaps
     bodyRatio: 0.95,
     pins: 14,
-    minSpan: 4,
-    maxSpan: 20,
+    minSpan: 6,
+    maxSpan: 6,
+    bodyColor: '#1e293b',
+    isDIP: true,
+  },
+  ic_dip8: {
+    defaultSpan: 3, // 8 pins = 4 per side = 3 pitch gaps
+    bodyRatio: 0.95,
+    pins: 8,
+    minSpan: 3,
+    maxSpan: 3,
     bodyColor: '#1e293b',
     isDIP: true,
   },
@@ -139,38 +148,51 @@ export function getGridPinPixels(
   pins: number,
   isDIP: boolean = false
 ): { x: number; y: number }[] {
-  const cx = paddingX + col * pitch + (span / 2) * pitch;
-  const cy = paddingY + row * pitch + (isDIP ? 1.5 * pitch : 0);
-  const halfSpanPx = (span / 2) * pitch;
-
+  const actualSpan = isDIP ? Math.floor(pins / 2) - 1 : span;
   const rad = (rotation * Math.PI) / 180;
-  const rot = (ox: number, oy: number) => ({
-    x: cx + ox * Math.cos(rad) - oy * Math.sin(rad),
-    y: cy + ox * Math.sin(rad) + oy * Math.cos(rad),
-  });
 
   if (isDIP) {
+    const cx = paddingX + col * pitch + (actualSpan / 2) * pitch;
+    const cy = paddingY + row * pitch + 1.5 * pitch;
     const res: { x: number; y: number }[] = [];
     const pinsPerSide = Math.floor(pins / 2);
-    const colSpacingPx = pitch;
-    const startX = -((pinsPerSide - 1) / 2) * colSpacingPx;
+    const startX = -(actualSpan / 2) * pitch;
+    
+    const rot = (ox: number, oy: number) => ({
+      x: cx + ox * Math.cos(rad) - oy * Math.sin(rad),
+      y: cy + ox * Math.sin(rad) + oy * Math.cos(rad),
+    });
     
     // Bottom row pins (1 to N/2) - reading left to right
     for (let i = 0; i < pinsPerSide; i++) {
-      res.push(rot(startX + i * colSpacingPx, 1.5 * pitch));
+      res.push(rot(startX + i * pitch, 1.5 * pitch));
     }
     // Top row pins (N/2 + 1 to N) - reading right to left
     for (let i = pinsPerSide - 1; i >= 0; i--) {
-      res.push(rot(startX + i * colSpacingPx, -1.5 * pitch));
+      res.push(rot(startX + i * pitch, -1.5 * pitch));
     }
     return res;
   }
 
+  // Standard components pivot around Pin 1 at (col, row)
+  const p1X = paddingX + col * pitch;
+  const p1Y = paddingY + row * pitch;
+  const p2X = p1X + actualSpan * pitch * Math.cos(rad);
+  const p2Y = p1Y + actualSpan * pitch * Math.sin(rad);
+
   if (pins === 2) {
-    return [rot(-halfSpanPx, 0), rot(halfSpanPx, 0)];
+    return [{ x: p1X, y: p1Y }, { x: p2X, y: p2Y }];
   }
+  
   if (pins === 3) {
-    return [rot(-halfSpanPx, 0), rot(halfSpanPx, 0), rot(0, -halfSpanPx)];
+    const midX = (p1X + p2X) / 2;
+    const midY = (p1Y + p2Y) / 2;
+    const half = (actualSpan / 2) * pitch;
+    // Middle pin bent outward orthogonally
+    const p3X = midX + half * Math.sin(rad);
+    const p3Y = midY - half * Math.cos(rad);
+    return [{ x: p1X, y: p1Y }, { x: p2X, y: p2Y }, { x: p3X, y: p3Y }];
   }
-  return [rot(-halfSpanPx, 0), rot(halfSpanPx, 0)];
+
+  return [{ x: p1X, y: p1Y }, { x: p2X, y: p2Y }];
 }
