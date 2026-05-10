@@ -1,0 +1,161 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{multicol}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{fancyhdr}
+\usepackage{tcolorbox}
+
+% Colors
+\definecolor{primary}{RGB}{30, 60, 90}
+\definecolor{secondary}{RGB}{70, 130, 180}
+\definecolor{accent}{RGB}{200, 80, 80}
+
+% Header/Footer
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\textcolor{secondary}{Toaster: AI Circuit Synthesis}}
+\lhead{\textcolor{secondary}{Parjanya \& Paniker}}
+\rfoot{Page \thepage}
+
+% Section styling
+\titleformat{\section}{\color{primary}\normalfont\Large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\color{secondary}\normalfont\large\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\color{black}\normalfont\normalsize\bfseries}{\thesubsubsection}{1em}{}
+
+\title{
+    \vspace{-2cm}
+    \textbf{\Huge Project Toaster 🍞} \\
+    \vspace{0.5cm}
+    \Large \textit{Advanced Physical-to-Digital Circuit Synthesis via Computer Vision and Graph Isomorphism}
+}
+
+\author{
+    \textbf{Kalakuntla Parjanya} \\
+    Roll No: 112401018 \\
+    \and
+    \textbf{Akshat Paniker} \\
+    Roll No: 122401003
+}
+\date{May 10, 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+The bridge between physical hardware prototyping and digital simulation has long been a bottleneck in electrical engineering. While breadboards allow for rapid, tactile experimentation, transcribing these physical circuits into SPICE environments for rigorous analysis is an iterative process fraught with human error. \textbf{Project Toaster} introduces an end-to-end framework that leverages Computer Vision (CV) and Graph Theory to automate this synthesis. By utilizing deep learning for component recognition and classical CV for wire tracing, the system generates high-fidelity digital twins of physical prototypes, complete with topological verification and simulation-ready netlists.
+
+\section{System Architecture}
+Toaster is architected as a decoupled, high-performance system consisting of three major layers:
+\begin{enumerate}
+    \item \textbf{Digitization Layer (Backend):} A FastAPI server that orchestrates the CV pipeline, utilizing OpenCV for image processing and Ultralytics YOLOv8 for object detection.
+    \item \textbf{Electromechanical Modeling Layer:} A Python-based logic engine that translates visual bounding boxes and pixel paths into logical circuit nodes.
+    \item \textbf{Verification \& Visualization Layer (Frontend):} A React-TypeScript interface that provides interactive validation and procedural rendering of the detected circuit.
+\end{enumerate}
+
+\section{Computer Vision Pipeline: Deep Dive}
+The reliability of the entire system hinges on the precision of the CV pipeline. This section explores the algorithmic nuances of marker detection and wire tracing.
+
+\subsection{Marker Detection and Perspective Orthorectification}
+The first hurdle in breadboard digitization is correcting for perspective distortion. A user-captured photo is rarely perfectly orthogonal to the board. To resolve this, Toaster utilizes a four-point calibration system.
+
+\subsubsection{Preprocessing and Feature Extraction}
+The raw image undergoes several stages of preprocessing to isolate calibration markers:
+\begin{itemize}
+    \item \textbf{Grayscale Conversion:} Reducing dimensionality to focus on intensity gradients.
+    \item \textbf{Gaussian Blurring:} A $5 \times 5$ kernel is applied to suppress high-frequency noise and sensor artifacts.
+    \item \textbf{Adaptive Thresholding:} The system employs Otsu's method (\texttt{cv2.THRESH\_OTSU}) to calculate an optimal bimodal threshold, creating a binary mask of potential marker candidates.
+\end{itemize}
+
+\subsubsection{Centroid Analysis and Moment Heuristics}
+After thresholding, the system performs contour detection using the Suzuki-Abe algorithm (\texttt{cv2.findContours}). Candidates are filtered based on area and circularity. For each valid contour, the image moments $M_{ij}$ are calculated:
+\begin{equation}
+    \bar{x} = \frac{M_{10}}{M_{00}}, \quad \bar{y} = \frac{M_{01}}{M_{00}}
+\end{equation}
+The resulting $(\bar{x}, \bar{y})$ coordinates represent the precise centroids of the calibration markers.
+
+\subsubsection{The Homography Transformation}
+To order the detected points into a consistent Top-Left (TL), Top-Right (TR), Bottom-Right (BR), and Bottom-Left (BL) sequence, a sum-and-difference heuristic is used:
+\begin{itemize}
+    \item \textbf{TL:} Point with minimum $(x+y)$.
+    \item \textbf{BR:} Point with maximum $(x+y)$.
+    \item \textbf{TR:} Point with minimum $(y-x)$.
+    \item \textbf{BL:} Point with maximum $(y-x)$.
+\end{itemize}
+These points are mapped to a canonical 928x586 rectangular grid using a $3 \times 3$ homography matrix $H$. The transformation is defined by:
+\begin{equation}
+    \begin{bmatrix} x' \\ y' \\ 1 \end{bmatrix} \approx H \begin{bmatrix} x \\ y \\ 1 \end{bmatrix}
+\end{equation}
+The final warped image is generated via bilinear interpolation, ensuring that the breadboard's physical grid holes align perfectly with the system's internal mathematical model.
+
+\subsection{Advanced Wire Tracing and Segmentation}
+Tracing jumper wires is significantly more complex than detecting static components, as wires are thin, curvilinear, and often overlap.
+
+\subsubsection{HSV-Space Segmentation}
+Unlike the RGB color space, which is highly sensitive to lighting variance, the HSV (Hue, Saturation, Value) space allows for robust color isolation. Toaster maintains a repository of nine color ranges (Red, Orange, Yellow, Green, Blue, Purple, Pink, Brown, Black). For each color, a binary mask is generated. This ensures that even in sub-optimal lighting, a blue wire remains distinguishable from its shadows.
+
+\subsubsection{Component-Aware Masking}
+Before wire tracing begins, the system utilizes the YOLOv8 component bounding boxes to "black out" areas occupied by resistors or LEDs. This prevents the red body of a resistor from being misidentified as a red jumper wire, a critical step in maintaining netlist integrity.
+
+\subsubsection{Morphological Healing and Cross-Kernels}
+Raw wire masks often contain micro-gaps due to specular reflections from the plastic insulation. Toaster applies a sequence of morphological operations:
+\begin{itemize}
+    \item \textbf{Opening:} Removes small noise artifacts.
+    \item \textbf{Closing with Cross-Kernel:} A specific $3 \times 3$ cross-shaped kernel (\texttt{cv2.MORPH\_CROSS}) is used to bridge gaps along the wire's longitudinal axis without causing "bleeding" into adjacent parallel wires.
+\end{itemize}
+
+\subsubsection{BFS-Based Connectivity and Merging}
+The system treats each connected colored blob as a potential wire. A Breadth-First Search (BFS) algorithm traverses the skeletonized mask to identify the two extreme endpoints. If multiple segments are found for the same color, a \textbf{Collinearity Check} is performed. Given three points $A, B,$ and $C$, the segments $AB$ and $BC$ are merged if:
+\begin{equation}
+    d(A, B) + d(B, C) - d(A, C) < \epsilon
+\end{equation}
+where $\epsilon$ is a small distance threshold relative to the breadboard pitch. This allows the system to reconstruct wires that were visually split by crossing components.
+
+\newpage
+
+\section{Graph Isomorphism and Circuit Verification}
+The true "intelligence" of Toaster lies in its ability to understand the electrical topology of the digitized circuit. This is achieved through advanced graph theory.
+
+\subsection{Bipartite Graph Representation}
+A breadboard circuit is naturally modeled as a \textbf{Bipartite Graph} $G = (V, E)$. The vertex set $V$ is partitioned into two disjoint sets:
+\begin{enumerate}
+    \item \textbf{Net Nodes ($V_{nets}$):} Representing the internal conductive strips of the breadboard.
+    \item \textbf{Component Nodes ($V_{comps}$):} Representing the physical electronic parts.
+\end{enumerate}
+An edge $e \in E$ exists only between a Net Node and a Component Node, signifying that a specific terminal of a component is inserted into a specific conductive strip.
+
+\subsection{Net Consolidation and Super-Nodes}
+Jumper wires are not treated as components in the graph. Instead, they act as "Net Mergers." If a wire is detected between Net $A$ and Net $B$, the two nodes are collapsed into a single \textbf{Super-Node} in the graph. This mathematical simplification reflects the physical reality that the two strips are now at the same electrical potential.
+
+\subsection{The Isomorphism Engine}
+Verification is performed by comparing the "Detected Graph" ($G_D$) with a "Reference Graph" ($G_R$) derived from a target schematic or SPICE netlist.
+
+\subsubsection{Sub-Graph Matching and VF2 Algorithm}
+Toaster utilizes the \textbf{VF2 algorithm} (via the NetworkX library) to determine if $G_D$ is isomorphic to $G_R$. This process is computationally intensive ($O(N!)$ in the worst case, but efficient for planar circuit graphs). The algorithm explores the state space of possible mappings between $G_D$ and $G_R$, pruning branches that violate topological constraints.
+
+\subsubsection{Attribute-Aware Verification}
+Standard isomorphism only checks connectivity. Toaster extends this by enforcing \textbf{Attribute Constraints}:
+\begin{itemize}
+    \item \textbf{Component Type:} A resistor in $G_D$ can only map to a resistor in $G_R$.
+    \item \textbf{Pin Polarity:} For polarized components like LEDs or Electrolytic Capacitors, the mapping must preserve the Anode/Cathode orientation. The graph edges are tagged with terminal IDs (e.g., \texttt{pin\_1}, \texttt{pin\_2}) to ensure this.
+    \item \textbf{Parametric Matching:} The system compares the detected "Value" (e.g., $1k\Omega$) with the reference value, flagging discrepancies even if the topology is correct.
+\end{itemize}
+
+\subsection{SPICE Netlist Generation}
+Once the graph is verified (or finalized by the user), the system traverses the Bipartite Graph to generate a standard SPICE \texttt{.cir} file. The generator identifies the \textbf{Ground Rail} by searching for nets connected to the negative power strip and assigns them the canonical Node 0. All other nodes are numerically indexed, and components are declared with their respective models and values.
+
+\section{Interactive Visualization}
+The frontend serves as the human-verification layer. It renders a logical representation of the board where components are drawn as procedural SVG paths. To maintain clarity, a \textbf{Manhattan Routing Engine} forces all wires into strictly orthogonal paths, utilizing an A* search variant to avoid collisions with component bodies. This ensures that even complex circuits remain readable for the end-user.
+
+\section{Conclusion and Future Work}
+Project Toaster demonstrates the feasibility of using low-cost computer vision to automate high-stakes engineering tasks. By formalizing the breadboard as a mathematical graph and employing robust CV heuristics for marker and wire detection, the system provides a reliable bridge to digital simulation. Future research will focus on real-time video-based tracing and the integration of transient analysis directly within the interactive web interface, further shortening the prototyping-to-production lifecycle.
+
+\end{document}

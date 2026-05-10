@@ -195,6 +195,21 @@ function App() {
     toast.success("Project saved successfully.");
   };
 
+  const handleExportSpice = () => {
+    if (!data || !data.netlist) {
+      toast.error("No netlist generated yet. Click 'Update Board' first.");
+      return;
+    }
+    const blob = new Blob([data.netlist], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `circuit_${new Date().toISOString().slice(0, 10)}.cir`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("SPICE Netlist (.cir) exported.");
+  };
+
   const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -366,7 +381,15 @@ function App() {
               <ComponentList components={data.components} />
             </div>
             <div style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-              <h2 style={{ fontSize: '1.2rem', margin: '0 0 1rem 0' }}>SPICE Output</h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h2 style={{ fontSize: '1.2rem', margin: 0 }}>SPICE Output</h2>
+                <button 
+                  onClick={handleExportSpice} 
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', padding: '0.3rem 0.6rem', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  <Download size={14} /> .CIR
+                </button>
+              </div>
               <NetlistViewer netlist={data.netlist} />
             </div>
             <div style={{ gridColumn: 'span 2' }}>
