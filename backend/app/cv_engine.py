@@ -76,7 +76,7 @@ def detect_and_warp(image: np.ndarray) -> Tuple[np.ndarray, List[List[float]]]:
     Returns (warped_image, detected_corners).
     """
     imgray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    imgray = cv2.GaussianBlur(imgray, (5, 5), 0)
+    imgray = cv2.GaussianBlur(imgray, (7, 7), 0)
 
     ret, thresh = cv2.threshold(imgray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -103,15 +103,57 @@ def detect_and_warp(image: np.ndarray) -> Tuple[np.ndarray, List[List[float]]]:
 
     centers = np.array([[int(i['m10']/i['m00']), int(i['m01']/i['m00'])] for i in filtered_moments])
     
-    # Order centers: TL, TR, BR, BL
-    s = centers.sum(axis=1)
-    diff = np.diff(centers, axis=1)
+    if len(centers) > 4:
+        from itertools import combinations
+        valid_quads = []
+        for quad in combinations(centers, 4):
+            pts = np.array(quad, dtype=np.float32)
+            # Order to form a proper polygon
+            cx = np.mean(pts[:, 0])
+            cy = np.mean(pts[:, 1])
+            angles = np.arctan2(pts[:, 1] - cy, pts[:, 0] - cx)
+            sorted_pts = pts[np.argsort(angles)]
+            valid_quads.append(sorted_pts)
+            
+        outermost_quads = []
+        for i, q1 in enumerate(valid_quads):
+            is_inside_another = False
+            area1 = cv2.contourArea(q1)
+            for j, q2 in enumerate(valid_quads):
+                if i == j: continue
+                area2 = cv2.contourArea(q2)
+                if area1 < area2:
+                    all_inside = True
+                    for pt in q1:
+                        if cv2.pointPolygonTest(q2, (float(pt[0]), float(pt[1])), False) < 0:
+                            all_inside = False
+                            break
+                    if all_inside:
+                        is_inside_another = True
+                        break
+            if not is_inside_another:
+                outermost_quads.append(q1)
+                
+        if outermost_quads:
+            best_quad = max(outermost_quads, key=cv2.contourArea)
+        else:
+            best_quad = valid_quads[0]
+            
+        centers = best_quad
+
+    # Sort centers using angle around their centroid to reliably get TL, TR, BR, BL
+    cx = np.mean(centers[:, 0])
+    cy = np.mean(centers[:, 1])
     
+    angles = np.arctan2(centers[:, 1] - cy, centers[:, 0] - cx)
+    # Sort by angle. In image coords (y down):
+    # TL is approx -3pi/4, TR is approx -pi/4, BR is approx pi/4, BL is approx 3pi/4
+    sorted_indices = np.argsort(angles)
     ordered_centers = np.array([
-        centers[np.argmin(s)],
-        centers[np.argmin(diff)],
-        centers[np.argmax(s)],
-        centers[np.argmax(diff)]
+        centers[sorted_indices[0]], # Top-Left
+        centers[sorted_indices[1]], # Top-Right
+        centers[sorted_indices[2]], # Bottom-Right
+        centers[sorted_indices[3]]  # Bottom-Left
     ], dtype="float32")
 
     warped = warp_with_points(image, ordered_centers)
