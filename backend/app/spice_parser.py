@@ -11,12 +11,13 @@ class SpiceParser:
         'R': 'resistor',
         'C': 'capacitor',
         'L': 'inductor',
-        'D': 'led', # Assuming diodes are LEDs for this breadboard context, or just generic diode
-        'Q': 'transistor_bjt',
-        'M': 'transistor_mosfet',
+        'D': 'diode', 
+        'Q': 'transistor',
+        'M': 'transistor',
         'V': 'voltage_source',
         'I': 'current_source',
-        'U': 'ic'
+        'U': 'ic',
+        'X': 'ic'
     }
 
     @staticmethod
@@ -41,22 +42,25 @@ class SpiceParser:
                 continue
             
             name = parts[0]
-            prefix = name[0].upper()
-            comp_type = SpiceParser.PREFIX_MAP.get(prefix, 'unknown')
+            upper_name = name.upper()
             
-            # Determine how many nodes to expect based on type
-            # This is a bit heuristic but follows standard SPICE
-            if prefix in ['R', 'C', 'L', 'V', 'I', 'D']:
+            # Heuristic: Check for multi-char prefix 'LED' first
+            if upper_name.startswith('LED'):
+                comp_type = 'led'
                 num_nodes = 2
-            elif prefix == 'Q':
-                num_nodes = 3
-            elif prefix == 'M':
-                num_nodes = 4
             else:
-                # Fallback: assume all parts until the last one (value) are nodes
-                # or if it's an IC (U), it could be many.
-                # For this project, we'll try to be smart.
-                num_nodes = len(parts) - 2 # Assuming last part is value/model
+                prefix = upper_name[0]
+                comp_type = SpiceParser.PREFIX_MAP.get(prefix, 'unknown')
+                
+                # Determine how many nodes to expect based on type
+                if prefix in ['R', 'C', 'L', 'V', 'I', 'D']:
+                    num_nodes = 2
+                elif prefix == 'Q':
+                    num_nodes = 3
+                elif prefix == 'M':
+                    num_nodes = 4
+                else:
+                    num_nodes = len(parts) - 2 # Assuming last part is value/model
             
             nodes = parts[1:1+num_nodes]
             value = parts[1+num_nodes] if len(parts) > 1+num_nodes else ""

@@ -116,8 +116,8 @@ def generate_spice_netlist(components: List[ComponentData], wires: List[Wire], g
 
     # Generating SPICE string
     result = ""
-    id_to_suffix = {-1: 'V', 0:'wire', 1: 'R', 2: 'C', 3: 'I', 4: 'MOST', 5: 'CIRT', 6: 'LED', 7: 'IC'}
-    counts = [0] * 8
+    id_to_suffix = {-1: 'V', 1: 'R', 2: 'C', 4: 'Q', 5: 'D', 6: 'LED', 7: 'U', 8: 'X'}
+    counts = [0] * 10
 
     remap= {} # Remap distinct node ids to continous numbers
     newnode = 1

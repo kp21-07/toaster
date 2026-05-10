@@ -94,10 +94,11 @@ async def solve_circuit(req: NetlistRequest):
             if "resistor" in ts: return 1
             if "capacitor" in ts: return 2
             if "led" in ts: return 6
+            if "diode" in ts: return 5
             if "transistor" in ts or "most" in ts: return 4
-            if "ic" in ts: return 7
-            if "voltage" in ts: return -1
-            return 7
+            if "ic" in ts or "integrated" in ts: return 7
+            if "voltage" in ts or "source" in ts: return -1
+            return 8 # Generic / Unknown
             
         solver_components = []
         for c in req.components:
@@ -257,8 +258,12 @@ async def analyze_image(
         for i, comp in enumerate(mapped_components):
             cls_id, name, labels, terminal_coords, original_box = comp
             spec = "1k" 
-            if "Resistor" in name: spec = "1k"
-            elif "LED" in name: spec = "Red"
+            if "resistor" in name.lower(): spec = "1k"
+            elif "capacitor" in name.lower(): spec = "100n"
+            elif "led" in name.lower(): spec = "Red"
+            elif "diode" in name.lower(): spec = "1N4148"
+            elif "transistor" in name.lower(): spec = "2N2222"
+            elif "ic" in name.lower(): spec = "DIP14"
             
             solver_components.append((cls_id, name, labels, spec))
             api_components.append(CircuitComponent(
