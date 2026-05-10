@@ -282,6 +282,7 @@ function App() {
                   <option value="diode">Diode</option>
                   <option value="transistor">Transistor</option>
                   <option value="ic">Integrated Circuit (DIP-14)</option>
+                  <option value="ic_dip8">Integrated Circuit (DIP-8)</option>
                   <option value="voltage_source">Voltage Source</option>
                 </select>
               </div>

@@ -104,16 +104,30 @@ def detect_and_warp(image: np.ndarray) -> Tuple[np.ndarray, List[List[float]]]:
     Returns (warped_image, detected_corners).
     """
     imgray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    imgray = cv2.GaussianBlur(imgray, (7, 7), 0)
+    imgray = cv2.GaussianBlur(imgray, (13, 13), 0)
 
-    ret, thresh = cv2.threshold(imgray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    thresh = cv2.adaptiveThreshold(imgray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31,7)
     contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
     if hierarchy is None:
         raise ValueError("No markers found - could not detect hierarchy.")
 
     mask = ((hierarchy[0][:, 0] == -1) & (hierarchy[0][:, 1] == -1) & (hierarchy[0][:, 2] == -1))
-    markers = np.where(mask)[0]
+    raw_markers = np.where(mask)[0]
+    
+    valid_markers = []
+    for m_idx in raw_markers:
+        c = contours[m_idx-1]
+        area = cv2.contourArea(c)
+        if area > 150000: # Filter out large light blobs
+            continue
+            
+        peri = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, 0.05 * peri, True)
+        if 4 <= len(approx) <= 6: # Strict side analysis for marker squares
+            valid_markers.append(m_idx)
+            
+    markers = np.array(valid_markers)
     
     if len(markers) < 4:
         # Fallback: try to find corners of the largest rectangle if markers fail

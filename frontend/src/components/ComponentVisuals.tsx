@@ -25,8 +25,15 @@ function getPinPositions(
 ): { pins: { x: number; y: number }[]; cx: number; cy: number } {
   const pinArr = getGridPinPixels(col, row, span, rotation, pins, isDIP);
   
-  const cx = paddingX + col * pitch + (span / 2) * pitch;
-  const cy = paddingY + row * pitch + (isDIP ? 1.5 * pitch : 0);
+  let cx, cy;
+  if (isDIP) {
+    const actualSpan = Math.floor(pins / 2) - 1;
+    cx = paddingX + col * pitch + (actualSpan / 2) * pitch;
+    cy = paddingY + row * pitch + 1.5 * pitch;
+  } else {
+    cx = (pinArr[0].x + pinArr[1].x) / 2;
+    cy = (pinArr[0].y + pinArr[1].y) / 2;
+  }
   
   return { pins: pinArr, cx, cy };
 }
@@ -391,10 +398,11 @@ function IcBody({ c, col, row, span, isGhost }: {
   c: CircuitComponent; col: number; row: number; span: number; isGhost: boolean;
 }) {
   const rotation = c.rotation ?? 0;
-  const fp = getFootprint('ic');
+  const fp = getFootprint(c.type);
   const { pins, cx, cy } = getPinPositions(col, row, span, rotation, fp.pins, fp.isDIP);
   
-  const spanPx = span * pitch;
+  const actualSpan = fp.isDIP ? Math.floor(fp.pins / 2) - 1 : span;
+  const spanPx = actualSpan * pitch;
   const bodyW = spanPx + pitch; // The black body spans the width of all pins
   const bodyH = 3 * pitch; // Straddles the trench
   const bodyX = cx - bodyW / 2;
@@ -454,7 +462,7 @@ export const ComponentVisuals: React.FC<Props> = ({
   const row = overrideRow ?? component.row ?? 6;
   const span = overrideSpan ?? component.span ?? getFootprint(component.type).defaultSpan;
 
-  if (component.type === 'ic') {
+  if (component.type === 'ic' || component.type === 'ic_dip8') {
     return <IcBody c={component} col={col} row={row} span={span} isGhost={isGhost} />;
   }
   if (component.type === 'transistor') {

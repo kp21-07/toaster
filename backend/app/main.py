@@ -275,6 +275,21 @@ async def analyze_image(
                 box=original_box
             ))
             
+        # Inject default 5V voltage source in the top rail
+        solver_components.append((-1, "voltage_source", ["Power+", "PowerTop-"], "5V"))
+        api_components.append(CircuitComponent(
+            id=999,
+            type="voltage_source",
+            name="V1",
+            terminals=["Power+", "PowerTop-"],
+            value="5V",
+            box=[],
+            col=10,
+            row=1,
+            span=1,
+            rotation=90
+        ))
+            
         api_wires = []
         solver_wires = []
         for idx, w in enumerate(wires_data):

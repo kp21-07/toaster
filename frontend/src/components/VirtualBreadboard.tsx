@@ -482,7 +482,8 @@ export const VirtualBreadboard: React.FC<VirtualBreadboardProps> = ({
                 <option value="voltage_source">Voltage Source</option>
                 <option value="led">LED</option>
                 <option value="diode">Diode</option>
-                <option value="ic">IC</option>
+                <option value="ic">IC (DIP-14)</option>
+                <option value="ic_dip8">IC (DIP-8)</option>
               </select>
             </div>
             <div className="edit-field">

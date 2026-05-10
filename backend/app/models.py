@@ -35,6 +35,10 @@ class CircuitComponent(BaseModel):
     terminals: List[str]
     value: str
     box: List[List[float]]
+    col: Optional[int] = None
+    row: Optional[int] = None
+    span: Optional[int] = None
+    rotation: Optional[int] = None
 
 class Wire(BaseModel):
     """

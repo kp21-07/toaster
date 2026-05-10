@@ -16,8 +16,16 @@ export const CalibrationOverlay: React.FC<CalibrationOverlayProps> = ({ imageFil
   const [imageLoaded, setImageLoaded] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const [, setWindowSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   
   const imgRef = useRef<HTMLImageElement>(null);
+
+  // Re-render markers if the window is resized or zoomed
+  useEffect(() => {
+    const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Initial mount: load original image and detect corners
   useEffect(() => {
@@ -168,7 +176,12 @@ export const CalibrationOverlay: React.FC<CalibrationOverlayProps> = ({ imageFil
           <div 
             className="calibration-image-container" 
             onClick={handleContainerClick}
-            style={{ position: 'relative', cursor: step === 2 ? 'crosshair' : 'default' }}
+            style={{ 
+              position: 'relative', 
+              cursor: step === 2 ? 'crosshair' : 'default',
+              alignSelf: 'center',
+              display: 'inline-block'
+            }}
           >
             {imgUrl && (
               <img 
@@ -177,7 +190,15 @@ export const CalibrationOverlay: React.FC<CalibrationOverlayProps> = ({ imageFil
                 alt="Board" 
                 onLoad={() => setImageLoaded(true)}
                 onDragStart={(e) => e.preventDefault()}
-                style={{ display: 'block', maxWidth: '100%', borderRadius: '8px', opacity: isDetecting || !imageLoaded ? 0.5 : 1 }} 
+                style={{ 
+                  display: 'block', 
+                  maxWidth: '100%', 
+                  maxHeight: '60vh',
+                  width: 'auto',
+                  height: 'auto',
+                  borderRadius: '8px', 
+                  opacity: isDetecting || !imageLoaded ? 0.5 : 1 
+                }} 
               />
             )}
 
@@ -222,11 +243,12 @@ export const CalibrationOverlay: React.FC<CalibrationOverlayProps> = ({ imageFil
             {step === 1 && corners.length === 4 && (
               <svg 
                 style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-                viewBox={`0 0 ${imgRef.current?.naturalWidth || 0} ${imgRef.current?.naturalHeight || 0}`}
-                preserveAspectRatio="none"
               >
                 <polygon 
-                  points={corners.map(c => `${c[0]},${c[1]}`).join(' ')} 
+                  points={corners.map(c => {
+                    const pos = getVisualPosition(c);
+                    return `${pos.left},${pos.top}`;
+                  }).join(' ')} 
                   fill="rgba(59, 130, 246, 0.2)" 
                   stroke="#3b82f6" 
                   strokeWidth="2" 
