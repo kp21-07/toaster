@@ -85,7 +85,21 @@ def detect_and_warp(image: np.ndarray) -> Tuple[np.ndarray, List[List[float]]]:
         raise ValueError("No markers found - could not detect hierarchy.")
 
     mask = ((hierarchy[0][:, 0] == -1) & (hierarchy[0][:, 1] == -1) & (hierarchy[0][:, 2] == -1))
-    markers = np.where(mask)[0]
+    raw_markers = np.where(mask)[0]
+    
+    valid_markers = []
+    for m_idx in raw_markers:
+        c = contours[m_idx-1]
+        area = cv2.contourArea(c)
+        if area > 150000: # Filter out large light blobs
+            continue
+            
+        peri = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, 0.05 * peri, True)
+        if 4 <= len(approx) <= 6: # Strict side analysis for marker squares
+            valid_markers.append(m_idx)
+            
+    markers = np.array(valid_markers)
     
     if len(markers) < 4:
         # Fallback: try to find corners of the largest rectangle if markers fail
