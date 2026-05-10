@@ -134,7 +134,9 @@ def detect_holes(warped_image: np.ndarray) -> Tuple[List[HoleCoord], float, floa
     final_holes = []
     for ry in row_targets:
         for cx in range(63):
-            final_holes.append((int(rx), int(ry)))
+            hx = paddingX + cx * pitch
+            final_holes.append((int(hx), int(ry)))
+
             
     if DEBUG_MODE:
         print(f"Calculated {len(final_holes)} holes on grid.")

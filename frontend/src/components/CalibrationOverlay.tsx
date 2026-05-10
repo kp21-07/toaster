@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Target, X, RefreshCw, Check } from 'lucide-react';
+import { Target, X } from 'lucide-react';
 import { detectCorners, preWarpImage } from '../api/client';
 
 interface CalibrationOverlayProps {
@@ -12,7 +12,6 @@ export const CalibrationOverlay: React.FC<CalibrationOverlayProps> = ({ imageFil
   const [step, setStep] = useState<1 | 2>(1); // 1: Markers, 2: Crop Box
   const [corners, setCorners] = useState<[number, number][]>([]);
   const [cropBoxPoints, setCropBoxPoints] = useState<[number, number][]>([]);
-  const [showGrid, setShowGrid] = useState(false);
   const [imgUrl, setImgUrl] = useState<string | undefined>(undefined);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
@@ -91,7 +90,7 @@ export const CalibrationOverlay: React.FC<CalibrationOverlayProps> = ({ imageFil
       onCalibrationComplete(corners, cropBox);
   };
 
-  const handleContainerClick = (e: React.MouseEvent) => {
+  const handleContainerClick = (_e: React.MouseEvent) => {
     // Disabled click-to-draw, we now use drag handles for cropBoxPoints
   };
 

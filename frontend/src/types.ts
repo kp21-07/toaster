@@ -22,6 +22,13 @@ export interface CircuitComponent {
     name: string;
     terminals: string[];
     value: string;
+
+    // Grid-native position — the source of truth for rendering
+    col?: number;    // anchor column index (left pin for horizontal, top pin for vertical)
+    row?: number;    // anchor row index
+    span?: number;   // number of holes the component spans (e.g. 3 for a standard resistor)
+
+    // Legacy: pixel bounding box from CV output. Used only for one-time migration to col/row/span.
     box?: number[][];
     rotation?: number;
 }

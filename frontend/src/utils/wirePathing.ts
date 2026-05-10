@@ -1,4 +1,6 @@
 import type { CircuitComponent } from '../types';
+import { pitch, paddingX, paddingY } from './breadboardMath';
+import { getFootprint, normaliseComponent } from './componentFootprints';
 
 /**
  * Checks if a line segment (p1 -> p2) intersects a bounding box.
@@ -9,15 +11,23 @@ function intersectsComponent(p1: [number, number], p2: [number, number], compone
     const [x2, y2] = p2;
     const padding = 2; // Small padding for the collision
 
-    for (const comp of components) {
-        if (!comp.box || comp.box.length < 4) continue;
+    for (const rawComp of components) {
+        const comp = normaliseComponent(rawComp);
+        const fp = getFootprint(comp.type);
         
-        const xs = comp.box.map(b => b[0]);
-        const ys = comp.box.map(b => b[1]);
-        const minX = Math.min(...xs) - padding;
-        const maxX = Math.max(...xs) + padding;
-        const minY = Math.min(...ys) - padding;
-        const maxY = Math.max(...ys) + padding;
+        const spanPx = (comp.span ?? fp.defaultSpan) * pitch;
+        const bodyW = spanPx * fp.bodyRatio;
+        const pin1x = paddingX + (comp.col ?? 0) * pitch;
+        const pin1y = paddingY + (comp.row ?? 0) * pitch;
+        
+        const cx = pin1x + spanPx / 2;
+        const cy = pin1y;
+        const hPx = 20;
+        
+        const minX = cx - bodyW / 2 - padding;
+        const maxX = cx + bodyW / 2 + padding;
+        const minY = cy - hPx / 2 - padding;
+        const maxY = cy + hPx / 2 + padding;
 
         if (x1 === x2) { // Vertical segment
             const segMinY = Math.min(y1, y2);
@@ -68,7 +78,7 @@ export function manhattanize(points: number[][], components: CircuitComponent[])
             result.push(midB, [x2, y2]);
         } else {
             // Both L-shapes hit. Try Z-shapes with multiple offsets.
-            const offsets = [14, -14, 28, -28, 42, -42];
+            const offsets = [pitch, -pitch, pitch * 2, -pitch * 2, pitch * 3, -pitch * 3];
             let doglegSuccess = false;
             
             for (const offset of offsets) {

@@ -1,5 +1,6 @@
 import type { CircuitComponent, Wire } from '../types';
 import { pitch, paddingX, paddingY } from './breadboardMath';
+import { getFootprint, normaliseComponent } from './componentFootprints';
 
 export function getPhysicalNodeId(x: number, y: number): string {
     const col = Math.round((x - paddingX) / pitch);
@@ -36,7 +37,6 @@ class UnionFind {
         let rootI = this.find(i);
         let rootJ = this.find(j);
         if (rootI !== rootJ) {
-            // Priority ordering ensures nodes like "Power+" or "Ground-" dominate over arbitrary aliases
             if (rootI.includes('Power') || rootI.includes('Ground')) {
                 this.parent[rootJ] = rootI;
             } else if (rootJ.includes('Power') || rootJ.includes('Ground')) {
@@ -46,6 +46,29 @@ class UnionFind {
             }
         }
     }
+}
+
+// Compute pixel (x,y) of each pin from grid-native position
+function getComponentPinPixels(c: CircuitComponent): { x: number; y: number }[] {
+    const norm = normaliseComponent(c);
+    const col = norm.col!;
+    const row = norm.row!;
+    const span = norm.span!;
+    const fp = getFootprint(c.type);
+
+    const pin1x = paddingX + col * pitch;
+    const pin1y = paddingY + row * pitch;
+    const pin2x = paddingX + (col + span) * pitch;
+    const pin2y = pin1y;
+
+    const pins: { x: number; y: number }[] = [{ x: pin1x, y: pin1y }];
+    if (fp.pins >= 2) pins.push({ x: pin2x, y: pin2y });
+    if (fp.pins >= 3) {
+        // 3rd pin: top of body center (transistor style)
+        const cx = (pin1x + pin2x) / 2;
+        pins.push({ x: cx, y: pin1y - 14.15 });
+    }
+    return pins;
 }
 
 export function buildRoutingGraph(components: CircuitComponent[], wires: Wire[]) {
@@ -58,19 +81,12 @@ export function buildRoutingGraph(components: CircuitComponent[], wires: Wire[])
     };
 
     components.forEach(c => {
-        if (!c.box) return;
-        const xs = c.box.map(p => p[0]);
-        const ys = c.box.map(p => p[1]);
-        const minX = Math.min(...xs);
-        const wPx = Math.max(...xs) - minX;
-        const hPx = Math.max(...ys) - Math.min(...ys);
-        const centerY = Math.min(...ys) + hPx / 2;
-        const minY = Math.min(...ys);
-
-        if (c.terminals && c.terminals.length >= 1) safeAdd(getPhysicalNodeId(minX - 20, centerY));
-        if (c.terminals && c.terminals.length >= 2) safeAdd(getPhysicalNodeId(minX + wPx + 20, centerY));
-        if (c.terminals && c.terminals.length >= 3) safeAdd(getPhysicalNodeId(minX + wPx / 2, minY - 20));
+        const pins = getComponentPinPixels(c);
+        pins.slice(0, c.terminals?.length ?? pins.length).forEach(p => {
+            safeAdd(getPhysicalNodeId(p.x, p.y));
+        });
     });
+
 
     wires.forEach(wire => {
         if (wire.points && wire.points.length >= 2) {
@@ -112,32 +128,11 @@ export function autoRouteCircuit(components: CircuitComponent[], wires: Wire[]):
     const { getNodeName } = buildRoutingGraph(components, wires);
 
     return components.map(c => {
-        if (!c.box) return c;
-        const xs = c.box.map(p => p[0]);
-        const ys = c.box.map(p => p[1]);
-        const minX = Math.min(...xs);
-        const minY = Math.min(...ys);
-        const wPx = Math.max(...xs) - minX;
-        const hPx = Math.max(...ys) - minY;
-
-        const centerY = minY + hPx / 2;
-        
-        const terminals: string[] = [];
-
-        // Evaluates dynamically exactly replicating snapToHole bounding algorithms
-        // Left Leg
-        if (c.terminals && c.terminals.length >= 1) {
-            terminals.push(getNodeName(getPhysicalNodeId(minX - 20, centerY)));
-        }
-        // Right Leg
-        if (c.terminals && c.terminals.length >= 2) {
-            terminals.push(getNodeName(getPhysicalNodeId(minX + wPx + 20, centerY)));
-        }
-        // Top Leg (Transistor)
-        if (c.terminals && c.terminals.length >= 3) {
-            terminals.push(getNodeName(getPhysicalNodeId(minX + wPx / 2, minY - 20)));
-        }
-
+        const pins = getComponentPinPixels(c);
+        const numTerminals = c.terminals?.length ?? pins.length;
+        const terminals = pins
+            .slice(0, numTerminals)
+            .map(p => getNodeName(getPhysicalNodeId(p.x, p.y)));
         return { ...c, terminals };
     });
 }

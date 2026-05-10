@@ -25,6 +25,7 @@ function App() {
   const [addForm, setAddForm] = useState({ name: '', type: 'resistor', value: '1k' });
   const [verificationResult, setVerificationResult] = useState<VerificationResponse | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [mountingComponent, setMountingComponent] = useState<Partial<CircuitComponent> | null>(null);
 
   const updateDataWithHistory = (newData: AnalysisResponse | ((prev: AnalysisResponse | null) => AnalysisResponse | null)) => {
     setData((prev) => {
@@ -219,23 +220,14 @@ function App() {
 
   const handleAddComponent = (type: string, value: string, customName: string) => {
      if (!data) return;
-     const newCompId = Math.max(0, ...(data.components || []).map(c => c.id)) + 1;
-     let name = customName.trim();
-     let numTerminals = 2;
-     if (type === 'transistor') numTerminals = 3;
-     if (!name) {
-       name = `${type.charAt(0).toUpperCase()}${newCompId}_new`;
-     }
-     const newComp: CircuitComponent = {
-         id: newCompId,
-         name,
-         type,
-         value,
-         box: [[200, 150], [260, 150], [260, 170], [200, 170]],
-         terminals: Array(numTerminals).fill('?'),
-         rotation: 0
-     };
-     updateDataWithHistory(prev => prev ? { ...prev, components: [...(prev.components || []), newComp] } : prev);
+     // Enter cursor-mount mode: the component ghost follows the cursor until the user clicks to place it
+     setMountingComponent({ type, value, name: customName.trim() || undefined });
+     setShowAddPopover(false);
+  };
+
+  const handleMountComplete = (placed: CircuitComponent) => {
+     updateDataWithHistory(prev => prev ? { ...prev, components: [...(prev.components || []), placed] } : prev);
+     setMountingComponent(null);
   };
 
   // Reusable button style
@@ -352,10 +344,13 @@ function App() {
                 components={data.components} 
                 wires={data.wires}
                 isDrawingWire={isDrawingWire}
-                warpedImage={showPhotoOverlay ? data.warped_image : undefined}
+                warpedImage={showPhotoOverlay ? (data.warped_image ?? undefined) : undefined}
                 onWireDrawn={() => setIsDrawingWire(false)}
                 onComponentsUpdate={handleComponentsUpdate} 
                 onWiresUpdate={(newWires) => updateDataWithHistory(prev => prev ? { ...prev, wires: newWires } : prev)}
+                mountingComponent={mountingComponent}
+                onMountComplete={handleMountComplete}
+                onMountCancel={() => setMountingComponent(null)}
               />
             </div>
           )}

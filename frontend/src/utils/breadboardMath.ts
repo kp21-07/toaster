@@ -7,19 +7,40 @@ export const validRowIndices = [
    21, 22, 24, 25, 26, 27, 28, 31, 32, 33, 34, 35, 37, 38
 ];
 
-export const snapToHole = (x: number, y: number) => {
-   let col = Math.round((x - paddingX) / pitch);
-   col = Math.max(0, Math.min(62, col));
-   const newX = paddingX + col * pitch;
+// Convert a grid column index to a pixel X coordinate
+export const colToPixelX = (col: number): number => paddingX + col * pitch;
 
-   let closestRowY = paddingY;
+// Convert a valid row index to a pixel Y coordinate
+export const rowIndexToPixelY = (rowIndex: number): number => paddingY + rowIndex * pitch;
+
+// Convert grid (col, rowIndex) -> pixel (x, y) — the canonical grid-to-pixel function
+export const holeToPixel = (col: number, rowIndex: number): { x: number; y: number } => ({
+   x: colToPixelX(col),
+   y: rowIndexToPixelY(rowIndex),
+});
+
+// Find the nearest valid rowIndex for a given pixel y
+export const pixelYToRowIndex = (y: number): number => {
+   let best = validRowIndices[0];
    let minDiff = Infinity;
    validRowIndices.forEach(r => {
       const ry = paddingY + r * pitch;
       if (Math.abs(ry - y) < minDiff) {
          minDiff = Math.abs(ry - y);
-         closestRowY = ry;
+         best = r;
       }
    });
-   return { x: newX, y: closestRowY };
+   return best;
+};
+
+// Find the nearest valid column for a given pixel x
+export const pixelXToCol = (x: number): number => {
+   const col = Math.round((x - paddingX) / pitch);
+   return Math.max(0, Math.min(62, col));
+};
+
+export const snapToHole = (x: number, y: number) => {
+   const col = pixelXToCol(x);
+   const rowIndex = pixelYToRowIndex(y);
+   return { x: colToPixelX(col), y: rowIndexToPixelY(rowIndex) };
 };
