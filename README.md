@@ -42,17 +42,3 @@
    npm install
    npm run dev
    ```
-
----
-
-## 🌍 Hosting
-
-The backend is built as a container-ready FastAPI app. For production deployment:
-1. **Docker:** Use a Dockerfile that includes `libgl1` (OpenCV dependency).
-2. **Reverse Proxy:** Use Nginx to handle SSL and proxy to the Uvicorn server (port 8000).
-3. **Hardware:** A server with at least 2GB RAM is recommended to load the YOLO models efficiently.
-
----
-
-## 📜 License
-MIT

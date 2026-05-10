@@ -9,6 +9,34 @@ import os
 # Debug Mode: Set TOASTER_DEBUG=1 in environment to enable debug image writing
 DEBUG_MODE = os.getenv("TOASTER_DEBUG", "0") == "1"
 
+# Slide Generation Mode: For the presentation!
+SLIDE_OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "test", "slide_outputs")
+
+COLORS_BGR = {
+    "Red": (0, 0, 255), "Orange": (0, 140, 255), "Yellow": (0, 255, 255),
+    "Green": (0, 200, 0), "Blue": (255, 100, 0), "Purple": (200, 0, 200),
+    "Pink": (180, 105, 255), "Brown": (19, 69, 139), "Black": (80, 80, 80),
+}
+
+def make_mask_grid(masks: Dict[str, np.ndarray], base_shape) -> np.ndarray:
+    names = list(masks.keys())
+    cell_h, cell_w = base_shape[0], base_shape[1]
+    sh, sw = cell_h // 3, cell_w // 3
+    grid = np.zeros((sh * 3, sw * 3, 3), dtype=np.uint8)
+
+    for idx, cname in enumerate(names[:9]):
+        r, c = divmod(idx, 3)
+        mask = masks.get(cname)
+        if mask is None: continue
+        color = COLORS_BGR.get(cname, (200, 200, 200))
+        colored = np.zeros((cell_h, cell_w, 3), dtype=np.uint8)
+        colored[mask > 0] = color
+        small = cv2.resize(colored, (sw, sh))
+        cv2.rectangle(small, (0, 0), (sw - 1, sh - 1), (255, 255, 255), 2)
+        cv2.putText(small, cname, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        grid[r*sh:(r+1)*sh, c*sw:(c+1)*sw] = small
+    return grid
+
 # --- Type Definitions ---
 Point = Tuple[float, float]
 HoleCoord = Tuple[int, int]
@@ -443,20 +471,43 @@ def extract_color_masks_engine(image: np.ndarray, components: List = [], debug: 
         color_masks[color_name] = mask
         if debug:
             cv2.imwrite(f"{debug_mask_dir}/{color_name}_mask.jpg", mask)
+            
+    # [SLIDE VISUAL 2]
+    os.makedirs(SLIDE_OUT_DIR, exist_ok=True)
+    cv2.imwrite(os.path.join(SLIDE_OUT_DIR, "2_HSV_Color_Segmentation.jpg"), make_mask_grid(color_masks, (height, width)))
+
         
     # --- Component Masking Logic ---
     # Zero out the regions occupied by detected components (resistors, LEDs, etc.)
-    # to prevent them from being detected as wires.
+    # to prevent them from being detected as wires. We dilate the component masks
+    # slightly to ensure no wire fragments are detected on the edges of components.
+    kernel_dilate = np.ones((7, 7), np.uint8)
     for color_name in color_masks:
         mask = color_masks[color_name]
         for comp in components:
             cls_id, name, coords = comp 
-            # SKIP if the component is the breadboard itself!
             if name.lower() == "breadboard":
                 continue
                 
             pts = np.array(coords, np.int32).reshape((-1, 1, 2))
-            cv2.fillPoly(mask, [pts], 0)
+            # Create temporary mask to dilate the exclusion zone
+            temp_comp_mask = np.zeros(mask.shape, dtype=np.uint8)
+            cv2.fillPoly(temp_comp_mask, [pts], 255)
+            temp_comp_mask = cv2.dilate(temp_comp_mask, kernel_dilate)
+            mask[temp_comp_mask > 0] = 0
+            
+    # [SLIDE VISUAL 1]
+    # We save an illustrative "Component Masking" image by drawing the bulked-out boxes
+    vis_comp_mask = image.copy()
+    for comp in components:
+        cls_id, name, coords = comp
+        if name.lower() != "breadboard":
+            pts = np.array(coords, np.int32).reshape((-1, 1, 2))
+            # Draw a slightly thicker polygon to represent the dilation
+            cv2.fillPoly(vis_comp_mask, [pts], (0, 0, 0))
+            cv2.polylines(vis_comp_mask, [pts], True, (0, 0, 0), 6) # Thick border to show dilation
+    cv2.imwrite(os.path.join(SLIDE_OUT_DIR, "1_Component_Masking.jpg"), vis_comp_mask)
+
             
     # --- Mask Healing Logic ---
     # Create a union of all detected wire colors
@@ -475,6 +526,9 @@ def extract_color_masks_engine(image: np.ndarray, components: List = [], debug: 
         # Constrain to only where SOME color was detected
         color_masks[color_name] = cv2.bitwise_and(healed, combined_wire_mask)
         
+    # [SLIDE VISUAL 3]
+    cv2.imwrite(os.path.join(SLIDE_OUT_DIR, "3_Morphological_Healing.jpg"), make_mask_grid(color_masks, (height, width)))
+        
     return color_masks
 
 def detect_wires_classic(image: np.ndarray, holes: List[HoleCoord], pitch: float, paddingX: float, paddingY: float, components: List = [], debug: bool = False) -> List[Dict]:
@@ -484,6 +538,10 @@ def detect_wires_classic(image: np.ndarray, holes: List[HoleCoord], pitch: float
     color_masks = extract_color_masks_engine(image, components, debug=debug)
     
     all_wire_data = []
+    
+    # Track BFS endpoints and merged endpoints for Slide Visuals
+    bfs_endpoints_vis = image.copy()
+    pre_merge_all = []
     
     for color_name, mask in color_masks.items():
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
@@ -531,6 +589,16 @@ def detect_wires_classic(image: np.ndarray, holes: List[HoleCoord], pitch: float
                 H2 = nearest_hole(E2)
                 if H1 != H2:
                     connections.append((H1, H2))
+                    pre_merge_all.append((color_name, E1, E2))
+                    
+            # For Slide Visual 4: Draw BFS raw endpoints
+            c_color = COLORS_BGR.get(color_name, (200, 200, 200))
+            contours, _ = cv2.findContours(comp_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(bfs_endpoints_vis, contours, -1, c_color, 1)
+            cv2.circle(bfs_endpoints_vis, E1, 5, (0, 255, 255), -1)
+            cv2.circle(bfs_endpoints_vis, E2, 5, (0, 255, 255), -1)
+            cv2.line(bfs_endpoints_vis, E1, E2, (0, 255, 255), 1, cv2.LINE_AA)
+
         
         # Smart Merge: Join segments of the same color that are collinear and close to each other.
         # This "heals" wires that are split into two blobs by an overlapping wire of a different color.
@@ -576,7 +644,25 @@ def detect_wires_classic(image: np.ndarray, holes: List[HoleCoord], pitch: float
             all_wire_data.append({
                 "color": color_name,
                 "endpoints": [hole_to_label.get(H1, "UNK"), hole_to_label.get(H2, "UNK")],
-                "path": path
+                "path": path,
+                "points": [H1, H2]  # needed for visualization
             })
             
+    # [SLIDE VISUAL 4 & 5]
+    cv2.imwrite(os.path.join(SLIDE_OUT_DIR, "4_BFS_Pathtracing.jpg"), bfs_endpoints_vis)
+    
+    merge_vis = image.copy()
+    for wd in all_wire_data:
+        cname = wd["color"]
+        p1, p2 = wd["points"]
+        c_color = COLORS_BGR.get(cname, (200, 200, 200))
+        cv2.circle(merge_vis, p1, 6, c_color, 2)
+        cv2.circle(merge_vis, p2, 6, c_color, 2)
+        cv2.line(merge_vis, p1, p2, c_color, 3, cv2.LINE_AA)
+    cv2.imwrite(os.path.join(SLIDE_OUT_DIR, "5_Merging.jpg"), merge_vis)
+
+    # Clean up "points" key from the payload so we don't accidentally leak it if not needed
+    for wd in all_wire_data:
+        wd.pop("points", None)
+
     return all_wire_data

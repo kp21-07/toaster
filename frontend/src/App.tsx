@@ -263,7 +263,10 @@ function App() {
                 <select value={addForm.type} onChange={e => setAddForm({...addForm, type: e.target.value})} style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.85rem', background: 'white' }}>
                   <option value="resistor">Resistor</option>
                   <option value="capacitor">Capacitor</option>
+                  <option value="led">LED</option>
+                  <option value="diode">Diode</option>
                   <option value="transistor">Transistor</option>
+                  <option value="ic">Integrated Circuit (DIP-14)</option>
                   <option value="voltage_source">Voltage Source</option>
                 </select>
               </div>
