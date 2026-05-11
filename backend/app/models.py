@@ -34,7 +34,7 @@ class CircuitComponent(BaseModel):
     name: str
     terminals: List[str]
     value: str
-    box: List[List[float]]
+    box: Optional[List[List[float]]] = None
     col: Optional[int] = None
     row: Optional[int] = None
     span: Optional[int] = None

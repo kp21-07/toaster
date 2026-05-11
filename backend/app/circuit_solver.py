@@ -18,7 +18,7 @@ def hole_to_node(hole: PhysicalHole) -> ElectricalNode:
         ElectricalNode: The canonical electrical node ID.
                        Returns empty string if input is invalid.
     """
-    if not hole: return ""
+    if not hole or hole == '?': return ""
     # The labels like "TopTerminal_11" or "Power+" are already canonical node groups
     # so we can just return them. 
     return hole
@@ -108,6 +108,7 @@ def generate_spice_netlist(components: List[ComponentData], wires: List[Wire], g
         feet = component[2]
         for foot in feet:
             node = hole_to_node(foot)
+            if not node: continue
             if node in nodemap:
                 flags[node] = True
             else:
@@ -117,7 +118,7 @@ def generate_spice_netlist(components: List[ComponentData], wires: List[Wire], g
     # Generating SPICE string
     result = ""
     id_to_suffix = {-1: 'V', 1: 'R', 2: 'C', 4: 'Q', 5: 'D', 6: 'LED', 7: 'U', 8: 'X'}
-    counts = [0] * 10
+    counts = [0] * 20
 
     remap= {} # Remap distinct node ids to continous numbers
     newnode = 1
@@ -140,6 +141,9 @@ def generate_spice_netlist(components: List[ComponentData], wires: List[Wire], g
 
         for foot in feet:
             node = hole_to_node(foot)
+            if not node:
+                line += " NC"
+                continue
 
             if nodemap[node] == 0:
                 line += " 0" # Ground

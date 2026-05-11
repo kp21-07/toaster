@@ -1,6 +1,6 @@
 export const pitch = 14.15;
 export const paddingX = 26;
-export const paddingY = 22;
+export const paddingY = 18;
 
 export const validRowIndices = [
    1, 2, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 17, 18,

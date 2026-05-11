@@ -150,12 +150,34 @@ Standard isomorphism only checks connectivity. Toaster extends this by enforcing
 \end{itemize}
 
 \subsection{SPICE Netlist Generation}
-Once the graph is verified (or finalized by the user), the system traverses the Bipartite Graph to generate a standard SPICE \texttt{.cir} file. The generator identifies the \textbf{Ground Rail} by searching for nets connected to the negative power strip and assigns them the canonical Node 0. All other nodes are numerically indexed, and components are declared with their respective models and values.
+Once the graph is verified (or finalized by the user), the system traverses the Bipartite Graph to generate a standard SPICE \texttt{.cir} file. The generator identifies the \textbf{Ground Rail} by searching for nets connected to the negative power strip and assigns them the canonical Node 0. All other nodes are numerically indexed, and components are declared with their respective models and values. To ensure full compatibility with professional simulation suites like LTSpice and NGSpice, the system automatically appends the \texttt{.backanno} directive for node-to-net mapping and the mandatory \texttt{.end} statement to signal the completion of the circuit description.
 
-\section{Interactive Visualization}
-The frontend serves as the human-verification layer. It renders a logical representation of the board where components are drawn as procedural SVG paths. To maintain clarity, a \textbf{Manhattan Routing Engine} forces all wires into strictly orthogonal paths, utilizing an A* search variant to avoid collisions with component bodies. This ensures that even complex circuits remain readable for the end-user.
+\section{Interactive Visualization and User Experience}
+The frontend interface (\texttt{VirtualBreadboard.tsx}) is not merely a display layer; it is the critical bridge that transforms raw computer vision data into a validated engineering tool. By integrating high-fidelity interaction with automated detection, Toaster achieves a "Human-in-the-loop" workflow that maximizes reliability.
 
-\section{Conclusion and Future Work}
-Project Toaster demonstrates the feasibility of using low-cost computer vision to automate high-stakes engineering tasks. By formalizing the breadboard as a mathematical graph and employing robust CV heuristics for marker and wire detection, the system provides a reliable bridge to digital simulation. Future research will focus on real-time video-based tracing and the integration of transient analysis directly within the interactive web interface, further shortening the prototyping-to-production lifecycle.
+\subsection{Closing the Prototyping Loop: Human-in-the-Loop Validation}
+Computer vision, particularly in unconstrained lighting environments, is rarely 100\% accurate. The Toaster UX acknowledges this by providing an interactive digital twin.
+\begin{itemize}
+    \item \textbf{Manual Error Correction:} Users can drag components, re-snap terminals to the grid, and edit component values (e.g., changing a misidentified $1k\Omega$ resistor to $10k\Omega$). This ensures that the final SPICE netlist is physically and electrically accurate.
+    \item \textbf{Live State Synchronization:} Any manual change in the UI immediately triggers a re-calculation of the underlying Bipartite Graph, providing real-time feedback on circuit validity via the verification panel.
+\end{itemize}
+
+\subsection{Cognitive Load Reduction via Manhattan Routing}
+A significant challenge in breadboarding is the "spaghetti" effect—crossed wires and overlapping components that make visual debugging difficult. Toaster's \textbf{Manhattan Routing Engine} addresses this by forcing all digitized wires into strictly orthogonal paths.
+\begin{itemize}
+    \item \textbf{Collision Avoidance:} The router utilizes a custom intersection-detection algorithm to route wires around component bodies. This creates a clean, schematic-like representation that is significantly easier to parse than a raw photograph.
+    \item \textbf{Visual Consistency:} By snapping all elements to a logical grid, the system provides a "cleanroom" view of the circuit, allowing engineers to spot topological errors that might be obscured in the physical layout.
+\end{itemize}
+
+\subsection{Workflow Integration: Export and Simulation Readiness}
+The project's ultimate goal is to facilitate simulation. The UI streamlines this through dedicated engineering views:
+\begin{itemize}
+    \item \textbf{Instant SPICE Export:} A one-click export feature generates a \texttt{.cir} file, allowing users to move from a physical photo to a running simulation in LTSpice or NGSpice within seconds.
+    \item \textbf{Live Netlist Viewer:} A syntax-highlighted viewer allows users to inspect the generated code in real-time, bridging the gap between the physical component and its mathematical abstraction.
+\end{itemize}
+This seamless integration significantly lowers the barrier to entry for circuit simulation, accelerating the hardware development lifecycle.
+
+\section{Conclusion}
+Project Toaster demonstrates the feasibility of using low-cost computer vision to automate high-stakes engineering tasks. By formalizing the breadboard as a mathematical graph and employing robust CV heuristics for marker and wire detection, the system provides a reliable bridge to digital simulation, significantly reducing the friction in the hardware development lifecycle.
 
 \end{document}

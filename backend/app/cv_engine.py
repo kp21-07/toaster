@@ -15,7 +15,7 @@ SLIDE_OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "test", "slide_out
 COLORS_BGR = {
     "Red": (0, 0, 255), "Orange": (0, 140, 255), "Yellow": (0, 255, 255),
     "Green": (0, 200, 0), "Blue": (255, 100, 0), "Purple": (200, 0, 200),
-    "Pink": (180, 105, 255), "Brown": (19, 69, 139), "Black": (80, 80, 80),
+    "Pink": (180, 105, 255), "Brown": (19, 69, 139),
 }
 
 def make_mask_grid(masks: Dict[str, np.ndarray], base_shape) -> np.ndarray:
@@ -207,7 +207,7 @@ def detect_holes(warped_image: np.ndarray) -> Tuple[List[HoleCoord], float, floa
     """
     pitch = 14.15
     paddingX = 26
-    paddingY = 22
+    paddingY = 18
 
     rows_relative = [1, 2, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 17, 18]
     row_targets = []
@@ -226,11 +226,11 @@ def detect_holes(warped_image: np.ndarray) -> Tuple[List[HoleCoord], float, floa
         print(f"Calculated {len(final_holes)} holes on grid.")
     return final_holes, pitch, paddingX, paddingY
 
-def map_to_breadboard_ids(hole_coords: List[HoleCoord], pitch: float, paddingX: float, paddingY: float) -> List[str]:
+def map_to_breadboard_ids(hole_coords: List[HoleCoord], pitch: float, paddingX: float, paddingY: float) -> List[Tuple[str, int, int]]:
     """
-    Maps dynamic hole coordinates to standard breadboard labels.
+    Maps dynamic hole coordinates to standard breadboard labels and their grid (col, row).
     """
-    ids = []
+    results = []
     for (hx, hy) in hole_coords:
         col = round((hx - paddingX) / pitch)
         row = round((hy - paddingY) / pitch)
@@ -250,8 +250,8 @@ def map_to_breadboard_ids(hole_coords: List[HoleCoord], pitch: float, paddingX: 
         elif row == 38: label = 'B2_Ground-'
         else: label = f'Unknown_{col}_{row}'
               
-        ids.append(label)
-    return ids
+        results.append((label, col, row))
+    return results
 
 def detect_components(image: np.ndarray, model: YOLO) -> List[RawComponent]:
     """
@@ -344,23 +344,29 @@ def map_terminals_to_holes(components: List[ComponentTerminals], holes: List[Hol
     """
     Maps floating-point terminal coordinates to the nearest snapped breadboard holes.
     """
-    hole_labels = map_to_breadboard_ids(holes, pitch, paddingX, paddingY)
-    hole_to_label = {holes[i]: hole_labels[i] for i in range(len(holes))}
+    hole_data = map_to_breadboard_ids(holes, pitch, paddingX, paddingY)
+    # hole_to_data: maps (x, y) pixel to (label, col, row)
+    hole_to_data = {holes[i]: hole_data[i] for i in range(len(holes))}
 
     mapped_components = []
     for comp in components:
         cls_id, name, terminals, coords = comp
-        mapped_terminals = []
-        terminal_coords = []
+        mapped_labels = []
+        terminal_grid_coords = [] # List of (col, row)
+        terminal_pixels = []
 
         for t_pt in terminals:
             closest_h = min(holes, key=lambda h: (h[0]-t_pt[0])**2 + (h[1]-t_pt[1])**2)
-            mapped_terminals.append(hole_to_label.get(closest_h, "UNK"))
-            terminal_coords.append(closest_h)
+            label, col, row = hole_to_data.get(closest_h, ("UNK", 0, 0))
+            mapped_labels.append(label)
+            terminal_grid_coords.append((col, row))
+            terminal_pixels.append(closest_h)
 
         if DEBUG_MODE:
-            print(f"Mapped {name} terminals to: {mapped_terminals}")
-        mapped_components.append((cls_id, name, mapped_terminals, terminal_coords, coords))
+            print(f"Mapped {name} terminals to labels: {mapped_labels} and grid: {terminal_grid_coords}")
+        
+        # MappedComponent: (cls_id, name, labels, terminal_pixels, box, terminal_grid_coords)
+        mapped_components.append((cls_id, name, mapped_labels, terminal_pixels, coords, terminal_grid_coords))
 
     return mapped_components
 
@@ -402,7 +408,7 @@ def detect_wires_yolo(image: np.ndarray, model: YOLO, holes: List[HoleCoord], pi
 
              all_wire_data.append({
                  "color": "unknown",
-                 "endpoints": [hole_to_label.get(H1, "UNK"), hole_to_label.get(H2, "UNK")],
+                 "endpoints": [hole_to_label.get(H1, ("UNK",0,0))[0], hole_to_label.get(H2, ("UNK",0,0))[0]],
                  "path": path
              })
 
@@ -437,9 +443,6 @@ def extract_color_masks_engine(image: np.ndarray, components: List = [], debug: 
         ],
         'Brown': [
             (np.array([10, 70, 30]), np.array([24, 255, 99]))
-        ],
-        'Black': [
-            (np.array([0, 0, 0]), np.array([180, 150, 85]))
         ]
     }
     
@@ -643,7 +646,7 @@ def detect_wires_classic(image: np.ndarray, holes: List[HoleCoord], pitch: float
             path = [H1, mid_point, H2]
             all_wire_data.append({
                 "color": color_name,
-                "endpoints": [hole_to_label.get(H1, "UNK"), hole_to_label.get(H2, "UNK")],
+                "endpoints": [hole_to_label.get(H1, ("UNK",0,0))[0], hole_to_label.get(H2, ("UNK",0,0))[0]],
                 "path": path,
                 "points": [H1, H2]  # needed for visualization
             })
