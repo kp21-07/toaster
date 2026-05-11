@@ -122,17 +122,28 @@ export const VerificationPanel: React.FC<VerificationPanelProps> = ({ onVerify, 
                                     {Object.keys(result.report.ref_values).map(comp => {
                                         const refVal = result.report.ref_values[comp];
                                         const detVal = result.report.det_values[comp] || 'Missing';
+                                        const isPolarityError = result.report.polarity_errors && result.report.polarity_errors.includes(comp);
                                         
                                         // Simple string comparison for UI highlighting, backend does the real check
                                         const refStr = String(refVal || '').toLowerCase().trim();
                                         const detStr = String(detVal || '').toLowerCase().trim();
-                                        const isMismatch = refStr && refStr !== 'none' && refStr !== detStr;
+                                        const isValueMismatch = refStr && refStr !== 'none' && refStr !== detStr;
                                         
+                                        const isError = isPolarityError || isValueMismatch || detVal === 'Missing';
+
                                         return (
-                                            <div key={comp} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', padding: '0.25rem 0', color: isMismatch ? '#dc2626' : '#166534' }}>
+                                            <div key={comp} style={{ 
+                                                display: 'grid', 
+                                                gridTemplateColumns: '1fr 1fr 1fr', 
+                                                gap: '0.5rem', 
+                                                padding: '0.25rem 0', 
+                                                color: isError ? '#dc2626' : '#166534',
+                                                backgroundColor: isPolarityError ? '#fff1f2' : 'transparent',
+                                                borderRadius: '4px'
+                                            }}>
                                                 <span>{comp}</span>
                                                 <span>{refVal || 'None'}</span>
-                                                <span>{detVal}</span>
+                                                <span>{isPolarityError ? <span style={{fontWeight: 700}}>Polarity Error</span> : detVal}</span>
                                             </div>
                                         );
                                     })}

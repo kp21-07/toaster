@@ -109,7 +109,9 @@ async def solve_circuit(req: NetlistRequest):
         for w in req.wires:
             solver_wires.append([w.id, f"Wire_{w.id}", w.endpoints])
             
-        netlist = generate_spice_netlist(solver_components, solver_wires, req.grounds)
+        default_grounds = ["PowerTop-", "Ground-", "B2_PowerTop-", "B2_Ground-"]
+        grounds = list(set(req.grounds + default_grounds))
+        netlist = generate_spice_netlist(solver_components, solver_wires, grounds)
         return {"netlist": netlist}
     except Exception as e:
         import traceback
@@ -132,7 +134,9 @@ async def verify_circuit(req: VerificationRequest):
         for w in req.wires:
             solver_wires.append([w.id, f"Wire_{w.id}", w.endpoints])
             
-        node_map, _ = build_node_map(solver_wires, req.grounds)
+        default_grounds = ["PowerTop-", "Ground-", "B2_PowerTop-", "B2_Ground-"]
+        grounds = list(set(req.grounds + default_grounds))
+        node_map, _ = build_node_map(solver_wires, grounds)
         
         # 3. Build Detected Graph
         G_det = CircuitGraphBuilder.build_from_detected(req.components, node_map)
@@ -301,8 +305,9 @@ async def analyze_image(
             ))
             solver_wires.append([idx, f"Wire_{idx}", w["endpoints"]])
  
-        # Generate Netlist
-        netlist = generate_spice_netlist(solver_components, solver_wires, [])
+        # Generate Netlist - automatically ground the negative rails
+        default_grounds = ["PowerTop-", "Ground-", "B2_PowerTop-", "B2_Ground-"]
+        netlist = generate_spice_netlist(solver_components, solver_wires, default_grounds)
 
         # DEBUG: Final Verification Plots
         if DEBUG_MODE:

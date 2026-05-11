@@ -32,7 +32,7 @@ class CircuitGraphBuilder:
                 pin_role = str(i + 1)
                 if comp_type == 'led':
                     pin_role = 'anode' if i == 0 else 'cathode'
-                elif comp_type == 'transistor_bjt':
+                elif comp_type == 'transistor':
                     pin_role = ['collector', 'base', 'emitter'][i] if i < 3 else str(i+1)
                 
                 G.add_edge(comp_name, net_name, pin_role=pin_role)
@@ -57,7 +57,7 @@ class CircuitGraphBuilder:
             ctype = ctype.lower()
             if 'resistor' in ctype: ctype = 'resistor'
             elif 'led' in ctype: ctype = 'led'
-            elif 'transistor' in ctype: ctype = 'transistor_bjt'
+            elif 'transistor' in ctype: ctype = 'transistor'
             
             G.add_node(name, type='component', comp_type=ctype, value=str(value))
             
@@ -71,7 +71,7 @@ class CircuitGraphBuilder:
                 pin_role = str(i + 1)
                 if ctype == 'led':
                     pin_role = 'anode' if i == 0 else 'cathode'
-                elif ctype == 'transistor_bjt':
+                elif ctype == 'transistor':
                     pin_role = ['collector', 'base', 'emitter'][i] if i < 3 else str(i+1)
                 
                 G.add_edge(name, net_name, pin_role=pin_role)
@@ -135,29 +135,68 @@ def edge_match(e1, e2):
     return e1['pin_role'] == e2['pin_role']
 
 def compare_circuits(G_ref: nx.Graph, G_det: nx.Graph) -> Tuple[bool, Dict]:
-    # Normalize symmetric components
+    """
+    Compares two circuit graphs.
+    Returns (is_matched, report).
+    """
+    
+    def get_report(mapping, isomorphic, polarity_errors=None):
+        ref_components = [n for n in G_ref.nodes if G_ref.nodes[n]['type'] == 'component']
+        ref_vals = {}
+        det_vals = {}
+        errors = polarity_errors or []
+        
+        for ref_n in ref_components:
+            ref_vals[ref_n] = G_ref.nodes[ref_n].get('value', '')
+            if mapping and ref_n in mapping:
+                det_n = mapping[ref_n]
+                det_vals[ref_n] = G_det.nodes[det_n].get('value', '')
+            else:
+                det_vals[ref_n] = "Missing"
+                
+        return {
+            "is_isomorphic": isomorphic,
+            "ref_values": ref_vals,
+            "det_values": det_vals,
+            "polarity_errors": errors,
+            "mapping": mapping if isomorphic else None
+        }
+
+    # 1. Normalize symmetric components in original graphs
     for G in [G_ref, G_det]:
         for u, v, data in G.edges(data=True):
-            if G.nodes[u]['type'] == 'component':
-                comp_node = u
-            elif G.nodes[v]['type'] == 'component':
-                comp_node = v
-            else:
-                continue
-            
+            comp_node = u if G.nodes[u]['type'] == 'component' else v
             if G.nodes[comp_node]['comp_type'] in ['resistor', 'capacitor', 'inductor']:
                 data['pin_role'] = 'symmetric'
 
+    # 2. Try Strict Match
     matcher = isomorphism.GraphMatcher(G_ref, G_det, node_match=node_match, edge_match=edge_match)
-    is_isomorphic = matcher.is_isomorphic()
+    if matcher.is_isomorphic():
+        return True, get_report(matcher.mapping, True)
+
+    # 3. Try Relaxed Match (Polarity Ignored)
+    G_ref_rel = G_ref.copy()
+    G_det_rel = G_det.copy()
+    for G in [G_ref_rel, G_det_rel]:
+        for u, v, data in G.edges(data=True):
+            comp_node = u if G.nodes[u]['type'] == 'component' else v
+            if G.nodes[comp_node]['comp_type'] in ['led', 'diode']:
+                data['pin_role'] = 'symmetric'
     
-    # Debug: collect all component values for report
-    ref_vals = {n: G_ref.nodes[n].get('value') for n in G_ref.nodes if G_ref.nodes[n]['type'] == 'component'}
-    det_vals = {n: G_det.nodes[n].get('value') for n in G_det.nodes if G_det.nodes[n]['type'] == 'component'}
-    
-    return is_isomorphic, {
-        "is_isomorphic": is_isomorphic,
-        "ref_values": ref_vals,
-        "det_values": det_vals,
-        "mapping": matcher.mapping if is_isomorphic else None
-    }
+    matcher_rel = isomorphism.GraphMatcher(G_ref_rel, G_det_rel, node_match=node_match, edge_match=edge_match)
+    if matcher_rel.is_isomorphic():
+        mapping = matcher_rel.mapping
+        polarity_errors = []
+        for ref_n, det_n in mapping.items():
+            if G_ref.nodes[ref_n]['type'] == 'component' and G_ref.nodes[ref_n]['comp_type'] in ['led', 'diode']:
+                # Check if edges match in strict mode
+                for net_ref in G_ref[ref_n]:
+                    net_det = mapping[net_ref]
+                    if G_ref[ref_n][net_ref]['pin_role'] != G_det[det_n][net_det]['pin_role']:
+                        polarity_errors.append(ref_n)
+                        break
+        
+        return False, get_report(mapping, False, polarity_errors)
+
+    # 4. Failed completely
+    return False, get_report(None, False)
