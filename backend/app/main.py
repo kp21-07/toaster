@@ -259,8 +259,9 @@ async def analyze_image(
         solver_components = []
         api_components = []
         
+        import math
         for i, comp in enumerate(mapped_components):
-            cls_id, name, labels, terminal_coords, original_box = comp
+            cls_id, name, labels, terminal_coords, original_box, grid_coords = comp
             spec = "1k" 
             if "resistor" in name.lower(): spec = "1k"
             elif "capacitor" in name.lower(): spec = "100n"
@@ -269,6 +270,19 @@ async def analyze_image(
             elif "transistor" in name.lower(): spec = "2N2222"
             elif "ic" in name.lower(): spec = "DIP14"
             
+            # Geometry Calculation
+            col, row, span, rotation = 10, 6, 3, 0 # defaults
+            if len(grid_coords) >= 2:
+                c1, r1 = grid_coords[0]
+                c2, r2 = grid_coords[1]
+                col, row = c1, r1
+                span = round(math.sqrt((c2-c1)**2 + (r2-r1)**2))
+                rotation = int(math.degrees(math.atan2(r2-r1, c2-c1)))
+            elif len(grid_coords) == 1:
+                col, row = grid_coords[0]
+                span = 1
+                rotation = 0
+
             solver_components.append((cls_id, name, labels, spec))
             api_components.append(CircuitComponent(
                 id=cls_id,
@@ -276,7 +290,11 @@ async def analyze_image(
                 name=f"{name}_{len(api_components)+1}",
                 terminals=labels,
                 value=spec,
-                box=original_box
+                box=original_box,
+                col=col,
+                row=row,
+                span=span,
+                rotation=rotation
             ))
             
         # Inject default 5V voltage source in the top rail
