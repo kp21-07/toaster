@@ -106,7 +106,7 @@ def detect_and_warp(image: np.ndarray) -> Tuple[np.ndarray, List[List[float]]]:
     imgray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     imgray = cv2.GaussianBlur(imgray, (13, 13), 0)
 
-    thresh = cv2.adaptiveThreshold(imgray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31,7)
+    thresh = cv2.adaptiveThreshold(imgray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31,5)
     contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
     if hierarchy is None:
@@ -137,7 +137,7 @@ def detect_and_warp(image: np.ndarray) -> Tuple[np.ndarray, List[List[float]]]:
     areas = np.array([i['m00'] for i in moments])
     areamean = np.mean(areas)
 
-    filtered_moments = [m for m in moments if m['m00'] > areamean]
+    filtered_moments = [m for m in moments if m['m00'] > areamean*(0.75)]
     
     if len(filtered_moments) < 4:
          sorted_indices = np.argsort(areas)[-4:]
@@ -521,11 +521,13 @@ def extract_color_masks_engine(image: np.ndarray, components: List = [], debug: 
     # For each mask, heal gaps by performing a large closing, but ONLY allowing it
     # to 'steal' pixels from the combined_wire_mask. This bridges overlaps without
     # bleeding into the white breadboard plastic.
-    kernel_heal = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
+    kernel_heal = cv2.getStructuringElement(cv2.MORPH_RECT, (170, 170))
+    kernel_heal_2 = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     for color_name in color_masks:
         m = color_masks[color_name]
         # Bridge the gaps
         healed = cv2.morphologyEx(m, cv2.MORPH_CLOSE, kernel_heal)
+        healed = cv2.morphologyEx(healed, cv2.MORPH_CLOSE, kernel_heal_2)
         # Constrain to only where SOME color was detected
         color_masks[color_name] = cv2.bitwise_and(healed, combined_wire_mask)
         
@@ -631,7 +633,7 @@ def detect_wires_classic(image: np.ndarray, holes: List[HoleCoord], pitch: float
                             d_AD = math.sqrt((D[0]-A[0])**2 + (D[1]-A[1])**2)
                             
                             # If they are collinear, then dist(A,B) + dist(B,C) + dist(C,D) ≈ dist(A,D)
-                            if abs((d_AB + gap_dist + d_CD) - d_AD) < 0.5 * pitch:
+                            if abs((d_AB + gap_dist + d_CD) - d_AD) < 2 * pitch:
                                 connections.pop(j)
                                 connections.pop(i)
                                 connections.append((A, D))
