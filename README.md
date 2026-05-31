@@ -44,3 +44,8 @@ Toaster is an engineering tool designed to convert physical breadboard photograp
    npm install
    npm run dev
    ```
+
+### Note
+
+The previous version of this project can be found [here](https://github.com/crypticks/pynetlistgen).
+
